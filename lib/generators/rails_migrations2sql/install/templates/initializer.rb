@@ -4,8 +4,8 @@ RailsMigrations2sql.configure do |config|
   # SQL dialect to generate: :postgresql, :mysql, :mariadb, :oracle or :sqlserver.
   config.target = :postgresql
 
-  # Default: Rails.root.join("db", "dba_migrations")
-  # config.output_path = Rails.root.join("db", "dba_migrations")
+  # Default: Rails.root.join("db", "sql")
+  # config.output_path = Rails.root.join("db", "sql")
 
   # Strict mode aborts instead of emitting guessed SQL for unsupported operations.
   config.strict = true

@@ -10,8 +10,11 @@ Gem::Specification.new do |spec|
   spec.summary = "Compile Rails migrations into DBA-ready SQL without running them."
   spec.description = "Compiles Rails 8 migrations offline into DBA-ready SQL packages, with up, down, register, unregister and manifest files for PostgreSQL, MySQL, MariaDB, Oracle and Microsoft SQL Server. Migrations are never applied and no database connection is required."
   spec.license = "MIT"
+  spec.homepage = "https://github.com/alexishida/rails_migrations2sql"
   spec.required_ruby_version = ">= 3.2"
 
+  spec.metadata["source_code_uri"] = spec.homepage
+  spec.metadata["bug_tracker_uri"] = "#{spec.homepage}/issues"
   spec.metadata["rubygems_mfa_required"] = "true"
 
   spec.files = Dir.chdir(__dir__) do

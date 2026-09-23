@@ -1,12 +1,53 @@
 # rails_migrations2sql
 
-`rails_migrations2sql` compiles Rails 8 migration files into DBA-ready SQL **without executing the migration**.
+Gem que converte migrations do Rails 8 em pacotes SQL para revisão e execução por DBAs. O compilador registra as operações de estrutura em memória e gera os scripts no dialeto escolhido, sem aplicar essas operações a um banco de dados.
 
-It is designed for teams where developers create Rails migrations normally, but production DDL must be reviewed and executed by a DBA.
+O projeto atende equipes em que desenvolvedores escrevem migrations normalmente, mas as alterações de produção precisam passar pela revisão de um DBA.
 
-## What it does
+[Repositório](https://github.com/alexishida/rails_migrations2sql) · [Issues](https://github.com/alexishida/rails_migrations2sql/issues) · [Licença MIT](LICENSE.txt)
 
-Given:
+## Requisitos
+
+- Aplicação Rails 8.x: as dependências `activerecord`, `activesupport` e `railties` aceitam versões `>= 8.0` e `< 9.0`.
+- Ruby compatível com o Rails escolhido. O gemspec declara `>= 3.2`, mas as dependências podem exigir uma versão superior.
+- Bundler e Git para instalar diretamente do GitHub.
+
+A compilação não exige um banco auxiliar. As tarefas carregam o ambiente da aplicação Rails, portanto seus initializers e dependências também precisam estar configurados.
+
+## Instalação pelo GitHub
+
+No `Gemfile` **da aplicação Rails que utilizará a gem**, adicione:
+
+```ruby
+group :development do
+  gem "rails_migrations2sql",
+      git: "https://github.com/alexishida/rails_migrations2sql.git",
+      branch: "main"
+end
+```
+
+Em seguida, na aplicação:
+
+```bash
+bundle install
+bin/rails generate rails_migrations2sql:install
+```
+
+A opção `git:` faz o Bundler baixar esta gem do repositório informado. O comando `bundle` também executa a instalação. O gerador cria `config/initializers/rails_migrations2sql.rb`.
+
+O `Gemfile.lock` registra o commit instalado. Para buscar uma atualização da gem na branch `main`:
+
+```bash
+bundle update rails_migrations2sql
+```
+
+Versione o `Gemfile.lock` da aplicação para compartilhar a mesma revisão com a equipe. Também é possível fixar um commit com `ref:` no lugar de `branch:`. Consulte a [documentação de fontes Git do Bundler](https://guides.rubygems.org/git/).
+
+Os links do repositório no gemspec são metadados; a origem do download é definida por `git:` no Gemfile da aplicação.
+
+## Uso rápido
+
+Considere o arquivo `db/migrate/20260923130000_add_status_to_orders.rb`:
 
 ```ruby
 class AddStatusToOrders < ActiveRecord::Migration[8.0]
@@ -17,16 +58,18 @@ class AddStatusToOrders < ActiveRecord::Migration[8.0]
 end
 ```
 
-Run:
+Gere os pacotes desde essa versão até a última migration disponível, usando o banco configurado:
 
 ```bash
-bin/rails dba:sql VERSION=20260923130000 TARGET=postgresql
+bin/rails dba:sql FROM=20260923130000
 ```
 
-The gem writes:
+O comando inclui a versão `20260923130000` e todas as posteriores, em ordem crescente, gerando um pacote por migration. Não é necessário informar `TO` nem `TARGET`.
+
+Com a configuração padrão (PostgreSQL), o pacote da migration acima fica em:
 
 ```text
-db/dba_migrations/postgresql/20260923130000_add_status_to_orders/
+db/sql/postgresql/20260923130000_add_status_to_orders/
 ├── up.sql
 ├── down.sql
 ├── register.sql
@@ -34,167 +77,152 @@ db/dba_migrations/postgresql/20260923130000_add_status_to_orders/
 └── manifest.yml
 ```
 
-No `db:migrate` is run. No shadow database is required.
+| Arquivo | Conteúdo |
+|---|---|
+| `up.sql` | SQL para aplicar a alteração. |
+| `down.sql` | SQL de reversão ou comentário explicando por que o rollback está indisponível. |
+| `register.sql` | Inserção da versão em `schema_migrations`. |
+| `unregister.sql` | Remoção da versão de `schema_migrations`. |
+| `manifest.yml` | Metadados, SHA-256 do arquivo de origem, operações, avisos e disponibilidade do rollback. |
 
-## Supported targets
+A geração não chama `db:migrate` nem executa os scripts produzidos. Gerar novamente o mesmo pacote sobrescreve seus arquivos.
 
-- PostgreSQL
-- MySQL
-- MariaDB
-- Oracle
-- Microsoft SQL Server
+## Bancos de destino
 
-The target is a compiler dialect, not a live connection.
+| Banco | Valor de `TARGET` |
+|---|---|
+| PostgreSQL | `postgresql` |
+| MySQL | `mysql` |
+| MariaDB | `mariadb` |
+| Oracle | `oracle` |
+| Microsoft SQL Server | `sqlserver` |
 
-## Installation
+O destino seleciona o dialeto do compilador; não representa uma conexão ativa com o banco. Use `TARGET=all` para gerar pacotes para todos os dialetos.
 
-```ruby
-group :development do
-  gem "rails_migrations2sql"
-end
-```
+## Configuração
 
-Then:
-
-```bash
-bundle install
-bin/rails generate rails_migrations2sql:install
-```
-
-Configure the target in `config/initializers/rails_migrations2sql.rb`:
+Edite `config/initializers/rails_migrations2sql.rb`:
 
 ```ruby
 RailsMigrations2sql.configure do |config|
   config.target = :oracle
   config.strict = true
+  config.output_path = Rails.root.join("db", "sql")
+  config.use_schema_snapshot = false
+  config.primary_key_type = :bigint
+  config.schema_migrations_table_name = "schema_migrations"
 end
 ```
 
-## Commands
+| Opção | Padrão | Finalidade |
+|---|---|---|
+| `target` | `RAILS_DBA_TARGET` ou `postgresql` | Dialeto padrão; pode ser sobrescrito por `TARGET`. |
+| `output_path` | `db/sql` na raiz da aplicação | Diretório dos pacotes gerados. |
+| `migrations_paths` | Caminhos do Active Record ou `db/migrate` | Diretórios de migrations. |
+| `strict` | `true` | Interrompe a compilação para operações não suportadas. |
+| `use_schema_snapshot` | `false` | Carrega um schema virtual a partir de `schema.rb`. |
+| `schema_path` | `db/schema.rb` na raiz da aplicação | Arquivo do snapshot opcional. |
+| `primary_key_type` | `bigint` | Tipo padrão de chave primária. |
+| `schema_migrations_table_name` | `schema_migrations` | Tabela usada nos scripts de controle de versão. |
 
-Latest migration:
+O initializer gerado define `config.target = :postgresql` explicitamente. Para usar o padrão de `RAILS_DBA_TARGET`, remova essa atribuição.
 
-```bash
-bin/rails dba:sql TARGET=postgresql
-```
+## Comandos
 
-Specific migration:
-
-```bash
-bin/rails dba:sql VERSION=20260923130000 TARGET=oracle
-```
-
-Several migrations:
-
-```bash
-bin/rails dba:sql VERSIONS=20260923130000,20260923131500 TARGET=sqlserver
-```
-
-Range:
+Execute na raiz da aplicação Rails:
 
 ```bash
-bin/rails dba:sql FROM=20260923000000 TO=20260923999999 TARGET=mysql
-```
+# Comando mais simples: migration mais recente, no banco configurado
+bin/rails dba:sql
 
-All migration files:
+# Da versão informada até a última migration, incluindo a versão inicial
+bin/rails dba:sql FROM=20260923130000
 
-```bash
-bin/rails dba:sql:all TARGET=mariadb
-```
+# Todos os arquivos de migration
+bin/rails dba:sql:all
 
-Generate every dialect:
+# Seleção explícita da mais recente
+bin/rails dba:sql:latest
 
-```bash
+# Uma versão
+bin/rails dba:sql VERSION=20260923130000
+
+# Várias versões
+bin/rails dba:sql VERSIONS=20260923130000,20260923131500
+
+# Intervalo inclusivo de versões
+bin/rails dba:sql FROM=20260923000000 TO=20260923999999
+
+# Alternativa para selecionar todos os arquivos
+bin/rails dba:sql ALL=1
+
+# Escolher outro banco apenas para esta execução
+bin/rails dba:sql TARGET=oracle
+
+# Uma versão em todos os dialetos
 bin/rails dba:sql VERSION=20260923130000 TARGET=all
 ```
 
-## Offline architecture
+### Da versão inicial até a última migration
 
-The migration class is loaded as Ruby, but the schema-changing DSL is replaced by an in-memory sandbox.
+Para gerar um lote a partir de uma versão conhecida, informe apenas `FROM`:
 
-```text
-migration.rb
-    |
-    v
-MigrationSandbox
-    |
-    v
-Operations / IR
-    |
-    +--> PostgreSQL compiler
-    +--> MySQL compiler
-    +--> MariaDB compiler
-    +--> Oracle compiler
-    +--> SQL Server compiler
-    |
-    v
-*.sql
+```bash
+bin/rails dba:sql FROM=20260923130000
 ```
 
-`create_table`, `add_column`, `add_index`, references, foreign keys and related commands are recorded as operations instead of being sent to Active Record's database connection.
+Esse comando inclui `20260923130000` e todas as migrations posteriores disponíveis nos arquivos do projeto, em ordem crescente de versão. Não é necessário informar `TO` nem conhecer a última versão: o limite final é a maior versão disponível. Cada migration gera seu próprio pacote SQL.
 
-## Supported migration DSL
+Use `FROM` para esse lote; `VERSION=20260923130000` seleciona somente aquela migration. A seleção não consulta o banco para verificar quais versões já foram aplicadas.
 
-The initial offline compiler supports the common structural migration operations:
+Para gerar o mesmo lote em outro dialeto:
 
-- `create_table` / `drop_table`
-- `create_join_table` / `drop_join_table`
-- `add_column` / `remove_column` / `remove_columns`
-- `rename_column` / `rename_table`
-- `change_column`
-- `change_column_default`
-- `change_column_null`
-- `add_index` / `remove_index` / `rename_index`
-- `add_reference` / `remove_reference` (`belongs_to` aliases too)
-- `add_foreign_key` / `remove_foreign_key`
-- `add_check_constraint` / `remove_check_constraint`
-- `add_timestamps` / `remove_timestamps`
-- `change_table`
-- `reversible`
-- `up_only`
-- block-form `revert`
-- `execute` for literal SQL
-- PostgreSQL `enable_extension` / `disable_extension`
-
-`create_table` supports common `TableDefinition` calls such as `string`, `text`, `integer`, `bigint`, `decimal`, `boolean`, `date`, `datetime`, `timestamp`, `binary`, `json`, `jsonb`, `uuid`, `references`, `timestamps`, `index` and `foreign_key`.
-
-## Rollbacks
-
-For a `change` migration the gem reverses operations offline.
-
-```ruby
-add_column :orders, :status, :string
-add_index :orders, :status
+```bash
+bin/rails dba:sql FROM=20260923130000 TARGET=oracle
 ```
 
-becomes a `down.sql` containing the inverse operations in reverse order.
+### Banco de destino e parâmetros opcionais
 
-When Rails-style reversal is ambiguous, the gem refuses to guess. For example:
+`TARGET` não é obrigatório: quando omitido, a gem usa `config.target` do initializer. Sem uma atribuição no initializer, usa `RAILS_DBA_TARGET` e, na ausência dessa variável, `postgresql`. O banco não é detectado automaticamente a partir de `config/database.yml`.
+
+`VERSION`, `VERSIONS`, `FROM`, `TO`, `ALL` e `TARGET` são parâmetros opcionais. Sem seleção, a tarefa usa o arquivo de maior versão. A seleção considera os arquivos disponíveis, sem consultar quais migrations já foram aplicadas no banco.
+
+## Operações suportadas
+
+O compilador cobre as operações estruturais comuns da DSL:
+
+- Tabelas: `create_table`, `drop_table`, `rename_table`, `create_join_table`, `drop_join_table` e `change_table`.
+- Colunas: `add_column`, `remove_column`, `remove_columns`, `rename_column`, `change_column`, `change_column_default` e `change_column_null`.
+- Índices: `add_index`, `remove_index` e `rename_index`.
+- Referências: `add_reference` e `remove_reference`, incluindo aliases de `belongs_to`.
+- Restrições: `add_foreign_key`, `remove_foreign_key`, `add_check_constraint` e `remove_check_constraint`.
+- Timestamps: `add_timestamps` e `remove_timestamps`.
+- Controle de direção: `reversible`, `up_only` e `revert` com bloco.
+- SQL literal: `execute`.
+- Extensões do PostgreSQL: `enable_extension` e `disable_extension`.
+
+Em `create_table`, estão disponíveis chamadas como `string`, `text`, `integer`, `bigint`, `decimal`, `boolean`, `date`, `datetime`, `timestamp`, `binary`, `json`, `jsonb`, `uuid`, `references`, `timestamps`, `index` e `foreign_key`.
+
+As opções disponíveis variam conforme o dialeto. O suporte a uma operação não implica suporte a todas as opções dos adapters do Active Record.
+
+## Rollback e SQL literal
+
+Para migrations com `change`, as operações reversíveis geram um `down.sql` com as operações inversas em ordem reversa. Quando a reversão precisa da definição anterior, informe-a:
 
 ```ruby
-remove_column :orders, :legacy_code
-```
-
-has no type information, so an offline compiler cannot know how to recreate it. Supply the type:
-
-```ruby
+# O tipo é necessário para recriar a coluna no rollback.
 remove_column :orders, :legacy_code, :string
-```
 
-Likewise, for an offline-reversible `change_column`, include the old definition:
-
-```ruby
+# A definição anterior permite reverter a alteração.
 change_column :orders, :total, :decimal,
   precision: 15,
   scale: 2,
   from: { type: :decimal, precision: 10, scale: 2 }
 ```
 
-If a rollback cannot be generated, `up.sql` is still generated and `down.sql` explains why rollback is unavailable.
+Se a avaliação identificar que a migration não é reversível, o pacote ainda inclui `up.sql`; `down.sql` explica o impedimento e o manifesto registra a indisponibilidade.
 
-## `execute`
-
-Literal SQL is supported for `up` migrations:
+SQL literal pode ser usado em `up`:
 
 ```ruby
 def up
@@ -205,24 +233,56 @@ def up
 end
 ```
 
-For a `change` migration, raw `execute` is not automatically reversible. Use `reversible`:
+Em `change`, use `reversible` para informar as duas direções:
 
 ```ruby
 def change
   reversible do |dir|
-    dir.up { execute "CREATE VIEW ..." }
-    dir.down { execute "DROP VIEW ..." }
+    dir.up { execute "CREATE VIEW active_users AS SELECT * FROM users WHERE active = true" }
+    dir.down { execute "DROP VIEW active_users" }
   end
 end
 ```
 
-Raw SQL is emitted as written. Portability is therefore the migration author's responsibility.
+O conteúdo de `execute` é emitido como escrito. Sua compatibilidade com o banco de destino é responsabilidade de quem escreve a migration.
 
-## Database-dependent Ruby is intentionally rejected
+## Snapshot opcional de schema
 
-This gem does not query production, development, or a shadow database to decide what a migration means.
+Predicados como `column_exists?` podem precisar de informações sobre a estrutura anterior:
 
-Migrations that depend on application data are outside the safe offline subset, for example:
+```ruby
+if column_exists?(:users, :legacy_code)
+  remove_column :users, :legacy_code, :string
+end
+```
+
+Para fornecer essas informações, habilite o carregamento de `schema.rb` em memória:
+
+```ruby
+RailsMigrations2sql.configure do |config|
+  config.use_schema_snapshot = true
+  config.schema_path = Rails.root.join("db", "schema.rb")
+end
+```
+
+O snapshot não é aplicado ao banco. Ele deve representar o estado imediatamente anterior à primeira migration selecionada; deixe a opção desabilitada se o arquivo não corresponder a esse estado.
+
+## Fluxo de execução pelo DBA
+
+1. Gere o pacote para o banco de destino.
+2. Revise `up.sql` e o manifesto.
+3. Execute `up.sql` no ambiente autorizado e valide a alteração.
+4. Execute `register.sql` para registrar a versão em `schema_migrations`.
+
+Para rollback, revise `down.sql` e `unregister.sql` com o DBA e execute a remoção do registro após reverter a alteração com sucesso.
+
+Os scripts de registro pressupõem que a tabela de controle já exista. A geração mantém o SQL de alteração separado do controle de versões do Rails.
+
+## Funcionamento e limitações
+
+A classe da migration é carregada como Ruby. O `MigrationSandbox` intercepta as chamadas da DSL suportada, registra operações em memória e as encaminha ao compilador do dialeto escolhido. O `PackageWriter` grava os scripts e o manifesto.
+
+O compilador não consulta dados da aplicação para decidir o que gerar. Migrations que dependem de modelos ou consultas, como as abaixo, ficam fora do fluxo offline suportado:
 
 ```ruby
 Order.where(status: nil).update_all(status: "pending")
@@ -232,50 +292,37 @@ if Order.count > 1_000_000
 end
 ```
 
-Those operations require real data and should be handled as explicit data-maintenance scripts or literal DBA-reviewed SQL.
+Trate essas alterações como scripts explícitos de manutenção de dados ou SQL revisado pelo DBA. Como o código Ruby da migration é avaliado, o sandbox da DSL não isola chamadas arbitrárias a modelos ou outros efeitos colaterais.
 
-## Optional `schema.rb` snapshot
+Algumas operações dependem do tipo atual da coluna ou de recursos específicos do servidor. Exemplos incluem alterar nulabilidade no MySQL, MariaDB ou SQL Server, índices específicos de cada banco e extensões de adapters. O modo estrito interrompe operações não suportadas.
 
-Some structural migrations use predicates such as:
+A versão `0.0.1` representa a implementação inicial do compilador offline. Revise o SQL e valide-o nas versões de banco utilizadas pela equipe antes da adoção em produção.
 
-```ruby
-if column_exists?(:users, :legacy_code)
-  remove_column :users, :legacy_code, :string
-end
+## Desenvolvimento e testes
+
+Para trabalhar no código da gem:
+
+```bash
+git clone https://github.com/alexishida/rails_migrations2sql.git
+cd rails_migrations2sql
+bundle install
+bundle exec rake test
 ```
 
-The compiler can optionally load `db/schema.rb` into an in-memory virtual schema. It does **not** execute that schema against a database.
+Neste repositório, o `Gemfile` usa `gemspec` para carregar a gem local e instalar suas dependências de desenvolvimento. A declaração com `git:` da seção de instalação pertence às aplicações consumidoras.
 
-```ruby
-RailsMigrations2sql.configure do |config|
-  config.use_schema_snapshot = true
-  config.schema_path = Rails.root.join("db", "schema.rb")
-end
-```
+A suíte usa Minitest; a tarefa padrão `bundle exec rake` também executa os testes.
 
-Leave this disabled when `schema.rb` does not represent the state immediately before the migration being compiled.
+| Caminho | Responsabilidade |
+|---|---|
+| [lib/rails_migrations2sql/](lib/rails_migrations2sql/) | Descoberta e avaliação de migrations, schema virtual e geração dos pacotes. |
+| [lib/rails_migrations2sql/compilers/](lib/rails_migrations2sql/compilers/) | Compiladores dos dialetos SQL. |
+| [lib/tasks/rails_migrations2sql.rake](lib/tasks/rails_migrations2sql.rake) | Tarefas `dba:sql`. |
+| [lib/generators/rails_migrations2sql/](lib/generators/rails_migrations2sql/) | Gerador do initializer de configuração. |
+| [test/](test/) | Testes do compilador offline. |
 
-## `schema_migrations`
+## Contribuição e licença
 
-The gem intentionally separates DDL from Rails bookkeeping.
+Relate problemas nas [issues](https://github.com/alexishida/rails_migrations2sql/issues), incluindo a migration, o dialeto e o resultado esperado. Para contribuir, envie um pull request com a alteração e os testes pertinentes.
 
-The DBA flow is normally:
-
-1. Review `up.sql`.
-2. Execute `up.sql` in production.
-3. Validate the schema change.
-4. Execute `register.sql` to insert the migration version into `schema_migrations`.
-
-For rollback, review `unregister.sql` and `down.sql` with the DBA before execution.
-
-## Important limitations
-
-This is an offline compiler, not a live Active Record adapter. Some database behavior depends on server version or existing metadata. Strict mode prefers an error over guessed SQL.
-
-Examples include changing nullability in MySQL/MariaDB or SQL Server when the existing column type is unknown, adapter-specific extensions, database-specific index features, and arbitrary Ruby/data migrations.
-
-For critical production changes, review generated SQL against the exact database/version used in production.
-
-## Development status
-
-Version `0.0.1` is the first offline-compiler design. The core compiler is intentionally conservative and should be integration-tested against the database versions used by your organization before production adoption.
+Distribuído sob a [licença MIT](LICENSE.txt).

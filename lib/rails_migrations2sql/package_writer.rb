@@ -42,7 +42,7 @@ module RailsMigrations2sql
       return configured.to_s if configured
 
       root = defined?(Rails) && Rails.respond_to?(:root) && Rails.root ? Rails.root.to_s : Dir.pwd
-      File.join(root, "db", "dba_migrations")
+      File.join(root, "db", "sql")
     end
 
     def write_sql(filename, header, statements)
