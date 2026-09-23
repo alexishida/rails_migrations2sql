@@ -25,7 +25,7 @@ class OfflineCompilerTest < Minitest::Test
       add_column :users, :active, :boolean, default: false, null: false
       reversible do |dir|
         dir.up { execute "CREATE VIEW active_users AS SELECT * FROM users WHERE active = 1" }
-        dir.down { execute "DROP VIEW active_users" }
+        dir.down { raise "Rollback must not be evaluated" }
       end
     end
   end
@@ -45,33 +45,26 @@ class OfflineCompilerTest < Minitest::Test
     ).evaluate
   end
 
-  def test_change_generates_up_and_down_without_database
+  def test_change_generates_application_sql_without_database
     compiler = RailsMigrations2sql::Compilers::PostgreSQL.new
     result = evaluate(FakeMigration, compiler)
 
-    assert result.rollback_available
     assert_equal :create_table, result.up_operations.first.name
-    assert_equal :remove_index, result.down_operations.first.name
-    assert_equal :drop_table, result.down_operations.last.name
 
     up = compiler.compile(result.up_operations).join("\n")
-    down = compiler.compile(result.down_operations).join("\n")
 
     assert_includes up, 'CREATE TABLE "orders"'
     assert_includes up, 'ALTER TABLE "orders" ADD "status" varchar(255) DEFAULT \'pending\' NOT NULL'
     assert_includes up, 'CREATE UNIQUE INDEX "index_orders_on_status"'
-    assert_includes down, 'DROP INDEX "index_orders_on_status"'
-    assert_includes down, 'DROP TABLE "orders"'
   end
 
-  def test_reversible_keeps_explicit_down_sql_in_correct_order
+  def test_reversible_evaluates_only_the_up_block
     compiler = RailsMigrations2sql::Compilers::PostgreSQL.new
     result = evaluate(ReversibleMigration, compiler)
 
-    assert result.rollback_available
-    down = compiler.compile(result.down_operations)
-    assert_match(/DROP VIEW active_users/, down.first)
-    assert_match(/DROP COLUMN "active"/, down.last)
+    sql = compiler.compile(result.up_operations)
+    assert_match(/ADD "active"/, sql.first)
+    assert_match(/CREATE VIEW active_users/, sql.last)
   end
 
   def test_all_dialects_compile_add_column
@@ -97,7 +90,7 @@ class OfflineCompilerTest < Minitest::Test
     end
   end
 
-  def test_irreversible_execute_in_change_marks_rollback_unavailable
+  def test_execute_in_change_does_not_require_rollback
     klass = Class.new do
       def initialize(*) = nil
       def change = execute("UPDATE users SET active = 1")
@@ -106,8 +99,6 @@ class OfflineCompilerTest < Minitest::Test
     compiler = RailsMigrations2sql::Compilers::PostgreSQL.new
     result = evaluate(klass, compiler)
 
-    refute result.rollback_available
-    assert_match(/execute is not automatically reversible/, result.rollback_error)
     assert_includes compiler.compile(result.up_operations).first, "UPDATE users"
   end
 end

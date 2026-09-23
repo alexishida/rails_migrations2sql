@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/core_ext/object/deep_dup"
+
 module RailsMigrations2sql
   class VirtualSchema
     Column = Struct.new(:name, :type, :options, keyword_init: true)
@@ -13,7 +15,15 @@ module RailsMigrations2sql
 
     def initialize_copy(other)
       super
-      @tables = Marshal.load(Marshal.dump(other.instance_variable_get(:@tables)))
+      @tables = other.instance_variable_get(:@tables).transform_values do |table|
+        Table.new(
+          name: table.name.dup,
+          known: table.known,
+          columns: duplicate_entries(table.columns),
+          indexes: duplicate_entries(table.indexes),
+          foreign_keys: duplicate_entries(table.foreign_keys)
+        )
+      end
     end
 
     def create_table(name, columns: [], indexes: [], foreign_keys: [])
@@ -58,8 +68,9 @@ module RailsMigrations2sql
 
     def rename_column(table_name, old_name, new_name)
       table = require_known_table!(table_name)
-      column = table.columns.delete(old_name.to_s)
+      column = table.columns[old_name.to_s]
       raise UnknownSchemaStateError, "Unknown column #{table_name}.#{old_name}" unless column
+      table.columns.delete(old_name.to_s)
 
       column.name = new_name.to_s
       table.columns[new_name.to_s] = column
@@ -82,9 +93,9 @@ module RailsMigrations2sql
 
     def remove_index(table_name, columns = nil, options = {})
       table = require_known_table!(table_name)
-      name = options[:name] || (columns && Util.default_index_name(table_name, columns))
-      if name
-        table.indexes.delete(name.to_s)
+      columns ||= options[:column]
+      if options[:name]
+        table.indexes.delete(options[:name].to_s)
       elsif columns
         wanted = Array(columns).map(&:to_s)
         key = table.indexes.find { |_k, idx| idx.columns == wanted }&.first
@@ -145,11 +156,12 @@ module RailsMigrations2sql
 
     def index_exists?(table_name, columns = nil, **options)
       table = require_known_table!(table_name)
-      name = options[:name]
-      return table.indexes.key?(name.to_s) if name
-
       wanted = Array(columns).map(&:to_s)
-      table.indexes.values.any? { |index| index.columns == wanted }
+      table.indexes.values.any? do |index|
+        (!columns || index.columns == wanted) &&
+          (!options[:name] || index.name == options[:name].to_s) &&
+          (!options.key?(:unique) || !!index.options[:unique] == !!options[:unique])
+      end
     end
 
     def foreign_key_exists?(from_table, to_table = nil, **options)
@@ -181,13 +193,15 @@ module RailsMigrations2sql
         add_column(operation.args[0], operation.args[1], operation.args[2], operation.options)
       when :remove_column
         remove_column(operation.args[0], operation.args[1])
+      when :remove_columns
+        operation.args.drop(1).each { |column| remove_column(operation.args[0], column) }
       when :rename_column
         rename_column(*operation.args.first(3))
       when :change_column
         change_column(operation.args[0], operation.args[1], operation.args[2], operation.options)
       when :change_column_default
         changes = operation.args[2]
-        value = changes.is_a?(Hash) ? (changes[:to] || changes["to"]) : changes
+        value = changes.is_a?(Hash) ? Util.change_value(changes, :to) : changes
         change_column(operation.args[0], operation.args[1], nil, default: value)
       when :change_column_null
         change_column(operation.args[0], operation.args[1], nil, null: operation.args[2])
@@ -222,6 +236,12 @@ module RailsMigrations2sql
     end
 
     private
+
+    def duplicate_entries(entries)
+      entries.transform_values do |entry|
+        entry.class.new(**entry.to_h.deep_dup)
+      end
+    end
 
     def require_known_table!(name)
       table = @tables[name.to_s]

@@ -95,6 +95,10 @@ module RailsMigrations2sql
         sql
       end
 
+      def drop_foreign_key_clause
+        "DROP FOREIGN KEY"
+      end
+
       def compile_add_foreign_key(op)
         opts = op.options
         if opts[:deferrable]

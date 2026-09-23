@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 RailsMigrations2sql.configure do |config|
-  # SQL dialect to generate: :postgresql, :mysql, :mariadb, :oracle or :sqlserver.
-  config.target = :postgresql
+  # Detect the primary database adapter for the current Rails environment.
+  # No database connection is opened. RAILS_DBA_TARGET overrides auto detection.
+  # Or set :postgresql, :mysql, :mariadb, :oracle or :sqlserver explicitly.
+  config.target = :auto
 
   # Default: Rails.root.join("db", "sql")
   # config.output_path = Rails.root.join("db", "sql")

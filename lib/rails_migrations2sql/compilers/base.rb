@@ -13,7 +13,7 @@ module RailsMigrations2sql
       end
 
       def compile(operations)
-        Array(operations).flat_map { |operation| Array(compile_operation(operation)) }.compact.reject(&:empty?)
+        Array(operations).flat_map { |operation| Array(compile_operation(operation)).flatten }.reject { |sql| sql.nil? || sql.empty? }
       end
 
       def compile_operation(operation)
@@ -22,7 +22,14 @@ module RailsMigrations2sql
           return unsupported!(operation.name, "No SQL compiler is implemented for #{operation.name}")
         end
 
-        send(method, operation)
+        statements = send(method, operation)
+        if operation.name == :change_column_null && operation.args[2] == false && !operation.args[3].nil?
+          table, column, _, default = operation.args
+          update = "UPDATE #{quote_table(table)} SET #{quote_column(column)} = #{literal(default)} WHERE #{quote_column(column)} IS NULL"
+          [update, *Array(statements)]
+        else
+          statements
+        end
       end
 
       def quote_table(name)
@@ -69,10 +76,10 @@ module RailsMigrations2sql
         data = op.data || {}
         columns = Array(data[:columns]).dup
 
-        unless options[:id] == false || columns.any? { |column| column.dig(:options, :primary_key) }
+        unless options[:id] == false || options[:primary_key].is_a?(Array) || columns.any? { |column| column.dig(:options, :primary_key) }
           id_name = options[:primary_key] || "id"
           id_type = options[:id].is_a?(Symbol) ? options[:id] : @primary_key_type
-          columns.unshift(name: id_name.to_s, type: id_type, options: { primary_key: true, auto_increment: true })
+          columns.unshift(name: id_name.to_s, type: id_type, options: { primary_key: true, auto_increment: %i[primary_key integer bigint].include?(id_type.to_sym) })
         end
 
         definitions = columns.map { |column| column_definition(column[:name], column[:type], column[:options] || {}) }
@@ -123,8 +130,8 @@ module RailsMigrations2sql
       end
 
       def compile_remove_columns(op)
-        op.args.drop(1).map do |column|
-          "ALTER TABLE #{quote_table(op.args[0])} DROP COLUMN #{quote_column(column)}"
+        op.args.drop(1).flat_map do |column|
+          Array(compile_remove_column(Operation.new(name: :remove_column, args: [op.args[0], column], options: op.options)))
         end
       end
 
@@ -240,12 +247,16 @@ module RailsMigrations2sql
         name = opts[:name] || (column && Util.default_foreign_key_name(from_table, column))
         raise UnsupportedOperationError, "remove_foreign_key requires name:, column:, or to_table offline" unless name
 
-        "ALTER TABLE #{quote_table(from_table)} DROP CONSTRAINT #{quote_identifier(name)}"
+        "ALTER TABLE #{quote_table(from_table)} #{drop_foreign_key_clause} #{quote_identifier(name)}"
+      end
+
+      def drop_foreign_key_clause
+        "DROP CONSTRAINT"
       end
 
       def compile_add_check_constraint(op)
         table, expression = op.args.first(2)
-        name = op.options[:name] || "chk_rails_#{Digest::SHA256.hexdigest("#{table}_#{expression}")[0, 10]}"
+        name = op.options[:name] || "chk_rails_#{Digest::SHA256.hexdigest("#{table}_#{expression}_chk")[0, 10]}"
         sql = "ALTER TABLE #{quote_table(table)} ADD CONSTRAINT #{quote_identifier(name)} CHECK (#{expression})"
         sql += " NOT VALID" if op.options[:validate] == false && target == :postgresql
         sql
@@ -253,7 +264,7 @@ module RailsMigrations2sql
 
       def compile_remove_check_constraint(op)
         table, expression = op.args.first(2)
-        name = op.options[:name] || (expression && "chk_rails_#{Digest::SHA256.hexdigest("#{table}_#{expression}")[0, 10]}")
+        name = op.options[:name] || (expression && "chk_rails_#{Digest::SHA256.hexdigest("#{table}_#{expression}_chk")[0, 10]}")
         raise UnsupportedOperationError, "remove_check_constraint requires name: or expression offline" unless name
 
         "ALTER TABLE #{quote_table(table)} DROP CONSTRAINT #{quote_identifier(name)}"
@@ -359,7 +370,7 @@ module RailsMigrations2sql
         order = opts[:order] || {}
         Array(columns).map do |column|
           name = column.to_s
-          direction = order[column.to_sym] || order[name]
+          direction = order.is_a?(Hash) ? (order[column.to_sym] || order[name]) : order
           [quote_column(name), direction&.to_s&.upcase].compact.join(" ")
         end.join(", ")
       end
@@ -374,7 +385,7 @@ module RailsMigrations2sql
 
       def change_to_value(value)
         if value.is_a?(Hash) && (value.key?(:to) || value.key?("to"))
-          value[:to] || value["to"]
+          Util.change_value(value, :to)
         else
           value
         end

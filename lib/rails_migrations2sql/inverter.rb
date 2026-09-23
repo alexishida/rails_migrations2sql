@@ -47,8 +47,8 @@ module RailsMigrations2sql
         unless changes.is_a?(Hash) && (changes.key?(:from) || changes.key?("from")) && (changes.key?(:to) || changes.key?("to"))
           raise IrreversibleOperationError, "change_column_default requires from:/to: to generate down SQL"
         end
-        from = changes[:from] || changes["from"]
-        to = changes[:to] || changes["to"]
+        from = Util.change_value(changes, :from)
+        to = Util.change_value(changes, :to)
         Operation.new(name: :change_column_default, args: [args[0], args[1], { from: to, to: from }], source: operation.source)
       when :change_column_null
         Operation.new(name: :change_column_null, args: [args[0], args[1], !args[2], args[3]], options: opts, source: operation.source)
@@ -101,7 +101,7 @@ module RailsMigrations2sql
         unless changes.is_a?(Hash) && (changes.key?(:from) || changes.key?("from")) && (changes.key?(:to) || changes.key?("to"))
           raise IrreversibleOperationError, "#{name} requires from:/to: to generate down SQL"
         end
-        swapped = { from: changes[:to] || changes["to"], to: changes[:from] || changes["from"] }
+        swapped = { from: Util.change_value(changes, :to), to: Util.change_value(changes, :from) }
         Operation.new(name: name, args: args[0...-1] + [swapped], options: opts, source: operation.source)
       when :execute
         raise IrreversibleOperationError, "execute is not automatically reversible; use reversible { |dir| ... } or explicit up/down methods"

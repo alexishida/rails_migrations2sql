@@ -53,7 +53,8 @@ module RailsMigrations2sql
 
     def method_missing(name, *_args, **_kwargs, &_block)
       raise UnsupportedOperationError,
-            "connection.#{name} requires a real database connection and cannot be compiled offline"
+            "connection.#{name} requires a real database connection and cannot be compiled offline; " \
+            "use execute with SQL reviewed by the DBA"
     end
 
     def respond_to_missing?(_name, _include_private = false)

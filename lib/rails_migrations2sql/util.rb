@@ -44,8 +44,12 @@ module RailsMigrations2sql
     end
 
     def default_foreign_key_name(table, column)
-      digest = Digest::SHA256.hexdigest("#{table}_#{column}_fk")[0, 10]
+      digest = Digest::SHA256.hexdigest("#{table}_#{Array(column).join('_and_')}_fk")[0, 10]
       "fk_rails_#{digest}"
+    end
+
+    def change_value(changes, key)
+      changes.key?(key) ? changes[key] : changes[key.to_s]
     end
 
     def symbolize_keys(hash)

@@ -2,6 +2,18 @@
 
 module RailsMigrations2sql
   module MigrationSandbox
+    UNSUPPORTED_QUERY_METHODS = %i[
+      select_value select_values select_all select_rows select_one exec_query exec_select
+    ].freeze
+
+    UNSUPPORTED_QUERY_METHODS.each do |method_name|
+      define_method(method_name) do |*_args, **_options, &_block|
+        raise UnsupportedOperationError,
+              "#{method_name} requires a real database connection and cannot be compiled offline; " \
+              "use execute with SQL reviewed by the DBA"
+      end
+    end
+
     SCHEMA_COMMANDS = %i[
       add_column remove_column rename_column change_column change_column_null
       add_index remove_index rename_index rename_table add_foreign_key remove_foreign_key
@@ -185,14 +197,19 @@ module RailsMigrations2sql
 
     def with_recorder(recorder)
       previous = _rdm_recorder
+      previous_connection = @_rdm_connection
       self._rdm_recorder = recorder
+      @_rdm_connection = nil
       yield
     ensure
       self._rdm_recorder = previous
+      @_rdm_connection = previous_connection
     end
 
     def enrich_from_schema(operation)
-      if operation.name == :change_column_null
+      if operation.name == :remove_index
+        operation.args[1] ||= operation.options[:column]
+      elsif operation.name == :change_column_null
         column = _rdm_recorder.schema.column(operation.args[0], operation.args[1])
         operation.options[:current_type] ||= column&.type
         operation.options[:current_options] ||= column&.options if column

@@ -34,7 +34,10 @@ module RailsMigrations2sql
       child = Recorder.new(direction: direction, change_mode: false, schema: schema)
       child.instance_variable_set(:@explicit_depth, @explicit_depth + 1)
       yield child
-      record_group(child.operations, label: label, explicit: true)
+      # The child shares this schema and has already applied its operations.
+      group = OperationGroup.new(operations: child.operations, label: label)
+      @units << group
+      group
     end
 
     def capture_neutral

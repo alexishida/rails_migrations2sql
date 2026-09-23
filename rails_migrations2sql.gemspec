@@ -7,8 +7,8 @@ Gem::Specification.new do |spec|
   spec.version = RailsMigrations2sql::VERSION
   spec.authors = ["Alex Ishida"]
 
-  spec.summary = "Compile Rails migrations into DBA-ready SQL without running them."
-  spec.description = "Compiles Rails 8 migrations offline into DBA-ready SQL packages, with up, down, register, unregister and manifest files for PostgreSQL, MySQL, MariaDB, Oracle and Microsoft SQL Server. Migrations are never applied and no database connection is required."
+  spec.summary = "Compile Rails migrations into SQL for DBA execution."
+  spec.description = "Compiles Rails 8 migrations into one SQL file per migration and target, with application statements and version registration. Supports PostgreSQL, MySQL, MariaDB, Oracle and Microsoft SQL Server without applying migrations to a database or evaluating rollback."
   spec.license = "MIT"
   spec.homepage = "https://github.com/alexishida/rails_migrations2sql"
   spec.required_ruby_version = ">= 3.2"

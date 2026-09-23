@@ -68,7 +68,11 @@ module RailsMigrations2sql
                       else
                         ""
                       end
-        "ALTER TABLE #{quote_table(table)} ALTER COLUMN #{quote_column(column)} #{type_sql(type, opts)}#{null_clause}"
+        statements = ["ALTER TABLE #{quote_table(table)} ALTER COLUMN #{quote_column(column)} #{type_sql(type, opts)}#{null_clause}"]
+        if opts.key?(:default)
+          statements << compile_change_column_default(Operation.new(name: :change_column_default, args: [table, column, opts[:default]]))
+        end
+        statements
       end
 
       def compile_change_column_default(op)
@@ -111,15 +115,21 @@ module RailsMigrations2sql
       end
 
       def drop_default_constraint_sql(table, column)
-        <<~SQL.strip
+        batch = <<~SQL.strip
           DECLARE @df sysname;
           SELECT @df = dc.name
           FROM sys.default_constraints dc
           JOIN sys.columns c ON c.default_object_id = dc.object_id
           WHERE dc.parent_object_id = OBJECT_ID(N'#{table.to_s.gsub("'", "''")}')
             AND c.name = N'#{column.to_s.gsub("'", "''")}';
-          IF @df IS NOT NULL EXEC(N'ALTER TABLE #{quote_table(table)} DROP CONSTRAINT [' + @df + N']');
+          IF @df IS NOT NULL
+          BEGIN
+            DECLARE @sql nvarchar(max);
+            SET @sql = N#{literal("ALTER TABLE #{quote_table(table)} DROP CONSTRAINT ")} + QUOTENAME(@df);
+            EXEC sys.sp_executesql @sql;
+          END;
         SQL
+        "EXEC sys.sp_executesql N#{literal(batch)};"
       end
     end
   end
