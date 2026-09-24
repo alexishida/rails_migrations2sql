@@ -9,6 +9,9 @@ RailsMigrations2sql.configure do |config|
   # Default: Rails.root.join("db", "sql")
   # config.output_path = Rails.root.join("db", "sql")
 
+  # Default: Rails.root.join("db", "seeds.rb")
+  # config.seeds_path = Rails.root.join("db", "seeds.rb")
+
   # Strict mode aborts instead of emitting guessed SQL for unsupported operations.
   config.strict = true
 

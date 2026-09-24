@@ -29,6 +29,7 @@ require_relative "rails_migrations2sql/schema_loader"
 require_relative "rails_migrations2sql/migration_evaluator"
 require_relative "rails_migrations2sql/sql_formatter"
 require_relative "rails_migrations2sql/package_writer"
+require_relative "rails_migrations2sql/seed_recorder"
 require_relative "rails_migrations2sql/generator"
 
 module RailsMigrations2sql
@@ -43,6 +44,10 @@ module RailsMigrations2sql
 
     def generate(**options)
       Generator.new(configuration).generate(**options)
+    end
+
+    def generate_seeds(**options)
+      Generator.new(configuration).generate_seeds(**options)
     end
   end
 end

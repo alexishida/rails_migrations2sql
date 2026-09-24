@@ -17,6 +17,7 @@ module RailsMigrations2sql
     attr_writer :target
     attr_accessor :output_path,
                   :migrations_paths,
+                  :seeds_path,
                   :schema_path,
                   :use_schema_snapshot,
                   :strict,
@@ -27,6 +28,7 @@ module RailsMigrations2sql
       @target = :auto
       @output_path = nil
       @migrations_paths = nil
+      @seeds_path = nil
       @schema_path = nil
       @use_schema_snapshot = false
       @strict = true

@@ -16,11 +16,20 @@ module RailsMigrations2sql
       end
     end
 
+    def generate_seeds(target: nil)
+      OfflineGuard.protect do
+        targets = resolve_targets(target)
+        rows = load_seed_rows(required: true)
+        Result.new(packages: write_seeds(rows, targets), migrations: [], targets: targets)
+      end
+    end
+
     private
 
     def generate_packages(version:, versions:, from:, to:, all:, latest:, target:)
       migrations = @discovery.select(version: version, versions: versions, from: from, to: to, all: all, latest: latest)
       targets = resolve_targets(target)
+      seed_rows = load_seed_rows(required: false)
       packages = []
       initial_schema = base_schema
       migration_classes = {}
@@ -51,7 +60,25 @@ module RailsMigrations2sql
         end
       end
 
+      packages.concat(write_seeds(seed_rows, targets)) if seed_rows
       Result.new(packages: packages, migrations: migrations, targets: targets)
+    end
+
+    def load_seed_rows(required:)
+      path = @configuration.seeds_path || File.join(project_root, "db", "seeds.rb")
+      unless File.file?(path)
+        raise ConfigurationError, "Seed file not found: #{path}" if required
+        return nil
+      end
+
+      SeedRecorder.capture(path)
+    end
+
+    def write_seeds(rows, targets)
+      targets.map do |target_name|
+        compiler = CompilerFactory.build(target_name, @configuration)
+        SeedRecorder.write(rows, compiler: compiler, configuration: @configuration)
+      end
     end
 
     def resolve_targets(target)
@@ -74,8 +101,11 @@ module RailsMigrations2sql
     end
 
     def default_schema_path
-      root = defined?(Rails) && Rails.respond_to?(:root) && Rails.root ? Rails.root.to_s : Dir.pwd
-      File.join(root, "db", "schema.rb")
+      File.join(project_root, "db", "schema.rb")
+    end
+
+    def project_root
+      defined?(Rails) && Rails.respond_to?(:root) && Rails.root ? Rails.root.to_s : Dir.pwd
     end
   end
 end

@@ -21,6 +21,15 @@ namespace :dba do
   end
 
   namespace :sql do
+    desc "Compile only db/seeds.rb into seeds.sql without a database connection"
+    task seeds: :environment do
+      result = RailsMigrations2sql.generate_seeds(target: ENV["TARGET"])
+      puts "Compiled seeds for #{result.targets.join(', ')}"
+      result.packages.each { |path| puts "  #{path}" }
+    rescue RailsMigrations2sql::Error => e
+      abort "rails_migrations2sql: #{e.message}"
+    end
+
     desc "Compile every migration file offline"
     task all: :environment do
       result = RailsMigrations2sql.generate(all: true, target: ENV["TARGET"])
