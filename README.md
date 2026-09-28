@@ -90,7 +90,7 @@ Em um projeto configurado com PostgreSQL, a migration acima gera apenas este arq
 db/sql/postgresql/20260923130000_add_status_to_orders.sql
 ```
 
-O arquivo da migration contém o SQL de aplicação, seguido da inserção da versão em `schema_migrations`. O comando não carrega `db/seeds.rb`. Para incluir os seeds, informe `SEEDS=1`; isso também gera `db/sql/postgresql/seeds.sql`.
+O arquivo da migration contém o SQL de aplicação, seguido da inserção da versão em `schema_migrations`. O comando também gera ou atualiza `db/sql/postgresql/seed.sql` automaticamente quando há um arquivo de seeds. `db/seeds_sql.rb` tem preferência quando existir; caso contrário, usa `db/seeds.rb`. Não é necessário informar `SEEDS=1`.
 
 A geração não chama `db:migrate` nem executa os scripts produzidos. Todas as migrations, dialetos e seeds solicitados são compilados antes da escrita: erros de compilação preservam os arquivos existentes. Cada arquivo é substituído atomicamente; uma falha de disco pode interromper o lote entre arquivos. Gerar novamente a mesma migration sobrescreve seus arquivos. Pastas e scripts produzidos pelo formato antigo não são removidos automaticamente e não devem ser executados junto com os novos arquivos.
 
@@ -127,7 +127,8 @@ end
 | `target` | `auto` | Detecta o adapter do banco principal do ambiente Rails atual; aceita um dialeto explícito. |
 | `output_path` | `db/sql` na raiz da aplicação | Diretório dos pacotes gerados. |
 | `migrations_paths` | Caminhos do Active Record ou `db/migrate` | Diretórios de migrations. |
-| `seeds_path` | `db/seeds.rb` na raiz da aplicação | Arquivo de seeds compilado quando existe. |
+| `seeds_path` | `db/seeds.rb` na raiz da aplicação | Seed Rails compilado automaticamente quando existe. |
+| `sql_seeds_path` | `seeds_sql.rb` ao lado de `seeds_path` | Exportação SQL explícita; tem preferência sobre o seed Rails. |
 | `strict` | `true` | Interrompe a compilação para operações não suportadas. |
 | `use_schema_snapshot` | `false` | Carrega um schema virtual a partir de `schema.rb`. |
 | `schema_path` | `db/schema.rb` na raiz da aplicação | Arquivo do snapshot opcional. |
@@ -165,8 +166,8 @@ bin/rails dba:sql:all
 # Seleção explícita da mais recente
 bin/rails dba:sql:latest
 
-# Incluir seeds explicitamente no lote de migrations
-bin/rails dba:sql FROM=20260923130000 SEEDS=1
+# Gerar somente migrations, sem atualizar seed.sql
+bin/rails dba:sql FROM=20260923130000 SEEDS=0
 
 # Gerar somente o seed, sem gerar migrations
 bin/rails dba:sql:seeds
@@ -192,15 +193,31 @@ bin/rails dba:sql VERSION=20260923130000 TARGET=all
 
 ### Dados do seed
 
-`dba:sql`, `dba:sql:all` e `dba:sql:latest` geram somente migrations por padrão, sem carregar `db/seeds.rb`. Para incluir `db/sql/<dialeto>/seeds.sql`, adicione `SEEDS=1`. Para gerar apenas esse arquivo, execute `bin/rails dba:sql:seeds`; `TARGET=all` funciona nos dois fluxos. Nos dois casos, a geração explícita de seeds exige que o arquivo exista. O arquivo é sobrescrito em uma nova geração e deve ser executado **depois** das migrations que criam as tabelas e colunas usadas pelos dados.
+`dba:sql`, `dba:sql:all` e `dba:sql:latest` geram as migrations e atualizam automaticamente `db/sql/<dialeto>/seed.sql`. Sem arquivo de seeds, geram apenas migrations. Use `SEEDS=0` para desabilitar os seeds ou `SEEDS=1` para exigir que existam. Para gerar apenas esse arquivo, execute `bin/rails dba:sql:seeds`; `TARGET=all` funciona nos dois fluxos, desde que o exportador suporte os destinos solicitados. O arquivo é sobrescrito em uma nova geração e deve ser executado **depois** das migrations que criam as tabelas e colunas usadas pelos dados.
 
 A compilação offline aceita `Model.create`, `Model.create!`, `Model.insert_all`, `Model.insert_all!` e `Model.find_or_create_by`/`find_or_create_by!` com atributos explícitos e valores escalares. Também aceita arrays de registros. Cada registro vira um `INSERT`; `find_or_create_by` gera uma inserção condicional com `WHERE NOT EXISTS`. A ordem dos registros no seed é preservada. IDs, timestamps e outros valores exigidos pelo banco precisam ser informados nos atributos ou definidos por default no schema. O gerador não executa validações, callbacks nem preenchimento automático de timestamps do Active Record.
 
 Consultas e comandos dependentes de resultados do banco, como `where`, `first` e uso de IDs gerados automaticamente, não podem ser convertidos sem conexão e geram erro. Blocos de `create` e `find_or_create_by` podem preencher atributos do registro antes do `INSERT`, inclusive `create!` sem atributos iniciais. Aliases declarados com `alias_attribute` são convertidos nos nomes reais das colunas, também nas condições de `find_or_create_by`. Opções de `insert_all` são rejeitadas. Como o arquivo Ruby é carregado durante a geração, use apenas seeds confiáveis e revise o SQL antes da execução.
 
-Se um seed usa consultas como `SiteSetting.first_or_initialize`, a compilação desse seed é interrompida sem acessar o banco. Isso não impede a geração das migrations com `dba:sql` sem `SEEDS=1`. Erros de Ruby e operações não suportadas em seeds identificam o arquivo e, quando disponível, a linha da falha. Arquivos `seeds.sql` de execuções anteriores são preservados; execute somente os arquivos listados pela geração atual.
+Se um seed usa consultas como `SiteSetting.first_or_initialize`, forneça uma exportação explícita em `db/seeds_sql.rb`. Consultas ao banco continuam bloqueadas durante a geração. Para gerar somente migrations, use `SEEDS=0`. Erros de Ruby e operações não suportadas em seeds identificam o arquivo e, quando disponível, a linha da falha. Arquivos `seed.sql` de execuções anteriores são preservados; execute somente os arquivos listados pela geração atual.
 
-Na API Ruby, use `RailsMigrations2sql.generate(from: "20260923130000", seeds: true)` para incluir seeds. Esta opção substitui o carregamento automático de seeds das versões anteriores.
+Na API Ruby, `seeds: :auto` é o padrão; `seeds: false` desabilita a exportação e `seeds: true` exige um arquivo. Essa versão restaura os seeds automáticos, desabilitados na versão 0.0.2.
+
+### Seeds que dependem de consultas e serviços
+
+Crie `db/seeds_sql.rb` com a tradução explícita das operações de dados. O arquivo é avaliado uma vez por dialeto e oferece `target`, `quote`, `quote_table`, `quote_column`, `sql`, `insert`, `update` e `execute`:
+
+```ruby
+now = sql("CURRENT_TIMESTAMP")
+lookup = { email: "admin@example.com" }
+insert :users, lookup.merge(name: "Administrador", created_at: now, updated_at: now),
+  unless_exists: lookup
+update :users, { name: "Administrador", updated_at: now }, where: lookup
+```
+
+`sql(...)` representa uma expressão que será avaliada pelo banco quando o DBA executar o arquivo. `execute(...)` apenas acrescenta SQL ao arquivo; não abre conexão. Valores normais são escapados pelo compilador do destino. O exportador precisa fornecer timestamps, associações e qualquer regra que dependa de callbacks. Compartilhe os dados entre o seed Rails e o exportador, por exemplo em JSON.
+
+O arquivo é procurado ao lado do `seeds_path` configurado. Para outro caminho, use `config.sql_seeds_path = Rails.root.join("db", "export_seed.rb")`. Quando esse caminho é explícito, sua ausência gera erro. Uma falha em qualquer seed ou dialeto preserva os SQLs existentes; não há exportação parcial silenciosa.
 
 ### Da versão inicial até a última migration
 
@@ -307,7 +324,7 @@ O snapshot não é aplicado ao banco. Quando habilitado, o arquivo deve existir;
 1. Gere os arquivos para o banco de destino.
 2. Revise cada `<versão>_<nome>.sql`.
 3. Execute os arquivos SQL em ordem crescente de versão, em um cliente configurado para interromper em caso de erro.
-4. Execute `seeds.sql`, quando gerado, após as migrations necessárias.
+4. Execute `seed.sql`, quando gerado, após as migrations necessárias.
 5. Valide as alterações, os dados e o registro das versões em `schema_migrations`.
 
 Cada arquivo contém as operações da migration e, ao final, o `INSERT` da versão. A tabela de controle deve existir e a versão ainda não deve estar registrada. O script não adiciona uma transação global: o registro final só deve ser executado se todas as operações anteriores tiverem sucesso. A gem não gera rollback.

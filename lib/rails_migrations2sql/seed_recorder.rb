@@ -96,7 +96,7 @@ module RailsMigrations2sql
       error_class = e.is_a?(UnsupportedOperationError) ? UnsupportedOperationError : OfflineCompilationError
       raise error_class,
             "Offline seed compilation failed at #{location || path}: #{e.class}: #{e.message}. " \
-            "Generate migrations separately with dba:sql (without SEEDS=1)"
+            "Provide db/seeds_sql.rb for database-dependent seeds, or use SEEDS=0 for migrations only"
     ensure
       Thread.current[CONTEXT_KEY] = previous
     end
@@ -111,7 +111,7 @@ module RailsMigrations2sql
         "db", "sql"
       )
       directory = File.join(root.to_s, compiler.target.to_s)
-      path = File.join(directory, "seeds.sql")
+      path = File.join(directory, "seed.sql")
       formatter = SqlFormatter.new(compiler.target)
       statements = rows.map do |entry|
         table = compiler.quote_table(entry[:table])

@@ -107,6 +107,15 @@ class OfflineQueriesTest < Minitest::Test
 
   def test_guard_rejects_establishing_a_connection
     RailsMigrations2sql::OfflineGuard.protect do
+      refute ActiveRecord::Base.connected?
+      refute Article.connected?
+      assert_raises(RailsMigrations2sql::UnsupportedOperationError) { Article.count }
+      assert_raises(RailsMigrations2sql::UnsupportedOperationError) { Article.connection_pool }
+    end
+  end
+
+  def test_guard_rejects_connection_creation
+    RailsMigrations2sql::OfflineGuard.protect do
       assert_raises(RailsMigrations2sql::UnsupportedOperationError) do
         ActiveRecord::Base.connection_handler.establish_connection({ adapter: "sqlite3", database: ":memory:" })
       end

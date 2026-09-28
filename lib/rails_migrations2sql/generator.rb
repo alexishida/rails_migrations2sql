@@ -10,7 +10,7 @@ module RailsMigrations2sql
       @loader = MigrationLoader.new
     end
 
-    def generate(version: nil, versions: nil, from: nil, to: nil, all: false, latest: false, target: nil, seeds: false)
+    def generate(version: nil, versions: nil, from: nil, to: nil, all: false, latest: false, target: nil, seeds: :auto)
       OfflineGuard.protect do
         generate_packages(version: version, versions: versions, from: from, to: to, all: all, latest: latest, target: target, seeds: seeds)
       end
@@ -19,8 +19,8 @@ module RailsMigrations2sql
     def generate_seeds(target: nil)
       OfflineGuard.protect do
         targets = resolve_targets(target)
-        rows = load_seed_rows
-        Result.new(packages: prepare_seeds(rows, targets).map(&:write), migrations: [], targets: targets)
+        files = prepare_seeds(targets, required: true)
+        Result.new(packages: files.map(&:write), migrations: [], targets: targets)
       end
     end
 
@@ -29,7 +29,10 @@ module RailsMigrations2sql
     def generate_packages(version:, versions:, from:, to:, all:, latest:, target:, seeds:)
       migrations = @discovery.select(version: version, versions: versions, from: from, to: to, all: all, latest: latest)
       targets = resolve_targets(target)
-      seed_rows = load_seed_rows if seeds
+      unless [true, false, :auto].include?(seeds)
+        raise ConfigurationError, "seeds must be true, false or :auto"
+      end
+      seed_files = seeds == false ? [] : prepare_seeds(targets, required: seeds == true)
       files = []
       initial_schema = base_schema
       migration_classes = {}
@@ -60,23 +63,29 @@ module RailsMigrations2sql
         end
       end
 
-      files.concat(prepare_seeds(seed_rows, targets)) if seed_rows
+      files.concat(seed_files)
       Result.new(packages: files.map(&:write), migrations: migrations, targets: targets)
     end
 
-    def load_seed_rows
+    def prepare_seeds(targets, required:)
       path = @configuration.seeds_path || File.join(project_root, "db", "seeds.rb")
-      unless File.file?(path)
-        raise ConfigurationError, "Seed file not found: #{path}"
+      sql_path = @configuration.sql_seeds_path || File.join(File.dirname(path), "seeds_sql.rb")
+      if @configuration.sql_seeds_path && !File.file?(sql_path)
+        raise ConfigurationError, "SQL seed file not found: #{sql_path}"
       end
-
-      SeedRecorder.capture(path)
-    end
-
-    def prepare_seeds(rows, targets)
+      sql_script = File.file?(sql_path)
+      unless sql_script || File.file?(path)
+        raise ConfigurationError, "Seed file not found: #{path}" if required
+        return []
+      end
+      rows = SeedRecorder.capture(path) unless sql_script
       targets.map do |target_name|
         compiler = CompilerFactory.build(target_name, @configuration)
-        SeedRecorder.prepare(rows, compiler: compiler, configuration: @configuration)
+        if sql_script
+          SeedScript.new(compiler: compiler, configuration: @configuration).prepare(sql_path)
+        else
+          SeedRecorder.prepare(rows, compiler: compiler, configuration: @configuration)
+        end
       end
     end
 

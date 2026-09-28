@@ -18,6 +18,7 @@ module RailsMigrations2sql
     attr_accessor :output_path,
                   :migrations_paths,
                   :seeds_path,
+                  :sql_seeds_path,
                   :schema_path,
                   :use_schema_snapshot,
                   :strict,

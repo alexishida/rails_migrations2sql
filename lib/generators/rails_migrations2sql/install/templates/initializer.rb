@@ -12,6 +12,10 @@ RailsMigrations2sql.configure do |config|
   # Default: Rails.root.join("db", "seeds.rb")
   # config.seeds_path = Rails.root.join("db", "seeds.rb")
 
+  # Seeds are included automatically. Use SEEDS=0 to generate only migrations.
+  # db/seeds_sql.rb takes precedence when a seed needs an explicit offline export.
+  # config.sql_seeds_path = Rails.root.join("db", "seeds_sql.rb")
+
   # Strict mode aborts instead of emitting guessed SQL for unsupported operations.
   config.strict = true
 

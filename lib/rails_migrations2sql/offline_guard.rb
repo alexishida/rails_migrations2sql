@@ -13,6 +13,12 @@ module RailsMigrations2sql
     end
 
     class ConnectionHandler < ActiveRecord::ConnectionAdapters::ConnectionHandler
+      # Loading an Active Storage model checks this predicate before inspecting
+      # tables. This handler owns no real connections or pools.
+      def connected?(*)
+        false
+      end
+
       def retrieve_connection_pool(*)
         reject_connection!
       end

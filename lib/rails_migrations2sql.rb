@@ -31,6 +31,7 @@ require_relative "rails_migrations2sql/sql_formatter"
 require_relative "rails_migrations2sql/output_file"
 require_relative "rails_migrations2sql/package_writer"
 require_relative "rails_migrations2sql/seed_recorder"
+require_relative "rails_migrations2sql/seed_script"
 require_relative "rails_migrations2sql/generator"
 
 module RailsMigrations2sql

@@ -10,32 +10,32 @@ class SeedGeneratorTest < Minitest::Test
     alias_attribute :headline, :title
   end
 
-  def test_migration_generation_writes_seeds_for_each_target_when_requested
+  def test_migration_generation_writes_seeds_for_each_target_by_default
     with_seed_file(<<~RUBY) do |config|
       SeedGeneratorTest::SeedArticle.create!(id: 1, title: "D'Artagnan", published: true)
       SeedGeneratorTest::SeedArticle.insert_all([{ id: 2, title: "Second", published: false }])
     RUBY
       config.migrations_paths = [File.expand_path("fixtures/migrations", __dir__)]
-      result = RailsMigrations2sql::Generator.new(config).generate(version: "20260923130000", target: "postgresql,mysql", seeds: true)
+      result = RailsMigrations2sql::Generator.new(config).generate(version: "20260923130000", target: "postgresql,mysql")
 
       assert_equal 4, result.packages.length
-      assert_equal 2, result.packages.count { |path| path.end_with?("seeds.sql") }
-      postgres = File.read(File.join(config.output_path, "postgresql", "seeds.sql"))
-      mysql = File.read(File.join(config.output_path, "mysql", "seeds.sql"))
+      assert_equal 2, result.packages.count { |path| path.end_with?("seed.sql") }
+      postgres = File.read(File.join(config.output_path, "postgresql", "seed.sql"))
+      mysql = File.read(File.join(config.output_path, "mysql", "seed.sql"))
       assert_includes postgres, %(INSERT INTO "seed_articles" ("id", "title", "published") VALUES (1, 'D''Artagnan', TRUE);)
       assert_includes mysql, "INSERT INTO `seed_articles` (`id`, `title`, `published`) VALUES (1, 'D''Artagnan', 1);"
       assert_equal 2, postgres.scan(/INSERT INTO/).length
     end
   end
 
-  def test_migration_generation_does_not_load_seeds_by_default
+  def test_migration_generation_does_not_load_seeds_when_disabled
     with_seed_file("raise 'Seeds must not be evaluated for migration SQL'\n") do |config|
       original_handler = ActiveRecord::Base.connection_handler
-      result = RailsMigrations2sql::Generator.new(config).generate(from: "20260923130000")
+      result = RailsMigrations2sql::Generator.new(config).generate(from: "20260923130000", seeds: false)
 
       assert_equal 2, result.migrations.length
       assert_equal 2, result.packages.length
-      refute result.packages.any? { |path| path.end_with?("seeds.sql") }
+      refute result.packages.any? { |path| path.end_with?("seed.sql") }
       assert_includes File.read(result.packages.first), "CREATE TABLE"
       assert_same original_handler, ActiveRecord::Base.connection_handler
     end
@@ -49,8 +49,8 @@ class SeedGeneratorTest < Minitest::Test
     RUBY
       result = RailsMigrations2sql::Generator.new(config).generate_seeds(target: "postgresql,oracle")
       assert_equal 2, result.packages.length
-      postgres = File.read(File.join(config.output_path, "postgresql", "seeds.sql"))
-      oracle = File.read(File.join(config.output_path, "oracle", "seeds.sql"))
+      postgres = File.read(File.join(config.output_path, "postgresql", "seed.sql"))
+      oracle = File.read(File.join(config.output_path, "oracle", "seed.sql"))
       assert_includes postgres, %(INSERT INTO "seed_articles" ("title", "category", "published") SELECT 'Existing', NULL, TRUE WHERE NOT EXISTS (SELECT 1 FROM "seed_articles" WHERE "title" = 'Existing' AND "category" IS NULL);)
       assert_includes oracle, "FROM DUAL WHERE NOT EXISTS"
     end
@@ -159,7 +159,7 @@ class SeedGeneratorTest < Minitest::Test
 
       assert_equal first.packages, second.packages
       assert_empty second.migrations
-      assert_equal [File.join(config.output_path, "postgresql", "seeds.sql")], second.packages
+      assert_equal [File.join(config.output_path, "postgresql", "seed.sql")], second.packages
       assert_equal second.packages, Dir[File.join(config.output_path, "**", "*.sql")]
       sql = File.read(second.packages.first)
       assert_includes sql, "VALUES (2, 'Second')"
@@ -211,7 +211,7 @@ class SeedGeneratorTest < Minitest::Test
 
       output, = capture_io { Rake::Task["dba:sql:seeds"].invoke }
       assert_includes output, "Compiled seeds for postgresql"
-      assert_equal [File.join(config.output_path, "postgresql", "seeds.sql")], Dir[File.join(config.output_path, "**", "*.sql")]
+      assert_equal [File.join(config.output_path, "postgresql", "seed.sql")], Dir[File.join(config.output_path, "**", "*.sql")]
     ensure
       Rake.application = original_rake
       RailsMigrations2sql.instance_variable_set(:@configuration, original_config)
@@ -219,7 +219,7 @@ class SeedGeneratorTest < Minitest::Test
   end
 
   %w[dba:sql dba:sql:all dba:sql:latest].each do |task_name|
-    define_method("test_#{task_name.tr(':', '_')}_only_includes_seeds_when_requested") do
+    define_method("test_#{task_name.tr(':', '_')}_updates_seeds_by_default_and_supports_disabling") do
       with_seed_file("SeedGeneratorTest::SeedArticle.create!(id: 3, title: 'Task')\n") do |config|
         original_rake = Rake.application
         original_config = RailsMigrations2sql.configuration
@@ -232,12 +232,24 @@ class SeedGeneratorTest < Minitest::Test
         load File.expand_path("../lib/tasks/rails_migrations2sql.rake", __dir__)
 
         capture_io { Rake::Task[task_name].invoke }
-        refute File.exist?(File.join(config.output_path, "postgresql", "seeds.sql"))
+        seed_output = File.join(config.output_path, "postgresql", "seed.sql")
+        assert_includes File.read(seed_output), "VALUES (3, 'Task')"
+        File.write(config.seeds_path, "SeedGeneratorTest::SeedArticle.create!(id: 4, title: 'Updated')\n")
+        Rake::Task[task_name].reenable
+        capture_io { Rake::Task[task_name].invoke }
+        assert_includes File.read(seed_output), "VALUES (4, 'Updated')"
+
+        ENV["SEEDS"] = "0"
+        File.write(config.seeds_path, "raise 'Seed must not be loaded'\n")
+        Rake::Task[task_name].reenable
+        capture_io { Rake::Task[task_name].invoke }
+        assert_includes File.read(seed_output), "VALUES (4, 'Updated')"
+        File.write(config.seeds_path, "SeedGeneratorTest::SeedArticle.create!(id: 3, title: 'Task')\n")
 
         ENV["SEEDS"] = "1"
         Rake::Task[task_name].reenable
         capture_io { Rake::Task[task_name].invoke }
-        assert_includes File.read(File.join(config.output_path, "postgresql", "seeds.sql")), "VALUES (3, 'Task')"
+        assert_includes File.read(File.join(config.output_path, "postgresql", "seed.sql")), "VALUES (3, 'Task')"
       ensure
         Rake.application = original_rake
         RailsMigrations2sql.instance_variable_set(:@configuration, original_config)
