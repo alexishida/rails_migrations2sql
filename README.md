@@ -1,22 +1,22 @@
 # rails_migrations2sql
 
-Gem que converte migrations e dados de `db/seeds.rb` do Rails 8 em arquivos SQL por banco de destino, para revisão e execução por DBAs. O compilador registra as operações de aplicação em memória, sem aplicá-las a um banco de dados nem avaliar o rollback.
+A gem that compiles Rails 8 migrations and seed data into SQL files for DBA review and execution. It records application operations in memory without applying them to a database or evaluating rollbacks.
 
-O projeto atende equipes em que desenvolvedores escrevem migrations normalmente, mas as alterações de produção precisam passar pela revisão de um DBA.
+It is designed for teams where developers write ordinary Rails migrations while production changes must be reviewed and executed by a DBA.
 
-[Repositório](https://github.com/alexishida/rails_migrations2sql) · [Issues](https://github.com/alexishida/rails_migrations2sql/issues) · [Licença MIT](LICENSE.txt)
+[Repository](https://github.com/alexishida/rails_migrations2sql) · [Issues](https://github.com/alexishida/rails_migrations2sql/issues) · [MIT License](LICENSE.txt)
 
-## Requisitos
+## Requirements
 
-- Aplicação Rails 8.x: as dependências `activerecord`, `activesupport` e `railties` aceitam versões `>= 8.0` e `< 9.0`.
-- Ruby compatível com o Rails escolhido. O gemspec declara `>= 3.2`, mas as dependências podem exigir uma versão superior.
-- Bundler e Git para instalar diretamente do GitHub.
+- Rails 8.x. The `activerecord`, `activesupport`, and `railties` dependencies support versions `>= 8.0` and `< 9.0`.
+- A Ruby version compatible with the selected Rails version. The gemspec requires Ruby `>= 3.2`.
+- Bundler and Git for installation from GitHub.
 
-A compilação não exige um banco auxiliar. As tarefas carregam o ambiente da aplicação Rails, portanto seus initializers e dependências também precisam estar configurados.
+Compilation does not require an auxiliary database. Rails still loads the application environment, so its initializers and dependencies must be configured.
 
-## Instalação pelo GitHub
+## Installation from GitHub
 
-No `Gemfile` **da aplicação Rails que utilizará a gem**, adicione:
+Add this to the **Rails application's** `Gemfile`:
 
 ```ruby
 group :development do
@@ -26,46 +26,40 @@ group :development do
 end
 ```
 
-Em seguida, na aplicação:
+Then run:
 
 ```bash
 bundle install
 bin/rails generate rails_migrations2sql:install
 ```
 
-A opção `git:` faz o Bundler baixar esta gem do repositório informado. O comando `bundle` também executa a instalação. O gerador cria `config/initializers/rails_migrations2sql.rb`.
-
-O `Gemfile.lock` registra o commit instalado. Para buscar uma atualização da gem na branch `main`:
+The generator creates `config/initializers/rails_migrations2sql.rb`. `Gemfile.lock` records the installed commit; update it with:
 
 ```bash
 bundle update rails_migrations2sql
 ```
 
-Versione o `Gemfile.lock` da aplicação para compartilhar a mesma revisão com a equipe. Também é possível fixar um commit com `ref:` no lugar de `branch:`. Consulte a [documentação de fontes Git do Bundler](https://guides.rubygems.org/git/).
+Commit `Gemfile.lock` so the whole team uses the same revision. You can pin a specific commit with `ref:` instead of `branch:`; see the [Bundler Git source documentation](https://guides.rubygems.org/git/).
 
-Os links do repositório no gemspec são metadados; a origem do download é definida por `git:` no Gemfile da aplicação.
+## Uninstallation
 
-## Desinstalação
-
-Na raiz da aplicação Rails, execute:
+From the Rails application root:
 
 ```bash
 bin/rails generate rails_migrations2sql:uninstall
 ```
 
-O comando usa `bundle remove rails_migrations2sql` para remover a dependência e atualizar o `Gemfile.lock`. Após o sucesso, remove `config/initializers/rails_migrations2sql.rb`. Os arquivos SQL já gerados e as migrations da aplicação são preservados; nenhuma alteração é feita no banco de dados.
+The generator removes the dependency with `bundle remove rails_migrations2sql`, updates `Gemfile.lock`, and removes its initializer only after Bundler succeeds. Generated SQL files and application migrations are preserved, and no database changes are made.
 
-Se o Bundler falhar, o `Gemfile` e o lockfile são restaurados e o initializer é mantido. Para visualizar a ação sem alterar arquivos:
+Preview the operation without modifying files:
 
 ```bash
 bin/rails generate rails_migrations2sql:uninstall --pretend
 ```
 
-Essa operação remove a dependência desta aplicação, sem desinstalar globalmente a gem usada por outros projetos. Consulte a [documentação de bundle remove](https://guides.rubygems.org/command-reference/bundle-remove/).
+## Quick start
 
-## Uso rápido
-
-Considere o arquivo `db/migrate/20260923130000_add_status_to_orders.rb`:
+For this migration:
 
 ```ruby
 class AddStatusToOrders < ActiveRecord::Migration[8.0]
@@ -76,27 +70,25 @@ class AddStatusToOrders < ActiveRecord::Migration[8.0]
 end
 ```
 
-Gere os pacotes desde essa versão até a última migration disponível, usando o banco configurado:
+Generate SQL from that version through the latest migration:
 
 ```bash
 bin/rails dba:sql FROM=20260923130000
 ```
 
-O comando inclui a versão `20260923130000` e todas as posteriores, em ordem crescente, gerando um arquivo SQL por migration. Não é necessário informar `TO` nem `TARGET`.
-
-Em um projeto configurado com PostgreSQL, a migration acima gera apenas este arquivo:
+The initial version and all following migrations are selected in ascending order. In a PostgreSQL project, this migration generates:
 
 ```text
 db/sql/postgresql/20260923130000_add_status_to_orders.sql
 ```
 
-O arquivo da migration contém o SQL de aplicação, seguido da inserção da versão em `schema_migrations`. O comando também gera ou atualiza `db/sql/postgresql/seed.sql` automaticamente quando há um arquivo de seeds. `db/seeds_sql.rb` tem preferência quando existir; caso contrário, usa `db/seeds.rb`. Não é necessário informar `SEEDS=1`.
+Each migration file contains its application SQL followed by a `schema_migrations` version insert. When seeds exist, the command also generates or updates `db/sql/<dialect>/seed.sql`. `db/seeds_sql.rb` takes precedence over `db/seeds.rb`.
 
-A geração não chama `db:migrate` nem executa os scripts produzidos. Todas as migrations, dialetos e seeds solicitados são compilados antes da escrita: erros de compilação preservam os arquivos existentes. Cada arquivo é substituído atomicamente; uma falha de disco pode interromper o lote entre arquivos. Gerar novamente a mesma migration sobrescreve seus arquivos. Pastas e scripts produzidos pelo formato antigo não são removidos automaticamente e não devem ser executados junto com os novos arquivos.
+The generator does not call `db:migrate` or execute generated SQL. All selected migrations, dialects, and seeds are compiled before files are written. Compilation errors preserve existing files, and each output file is replaced atomically.
 
-## Bancos de destino
+## Target databases
 
-| Banco | Valor de `TARGET` |
+| Database | `TARGET` value |
 |---|---|
 | PostgreSQL | `postgresql` |
 | MySQL | `mysql` |
@@ -104,11 +96,11 @@ A geração não chama `db:migrate` nem executa os scripts produzidos. Todas as 
 | Oracle | `oracle` |
 | Microsoft SQL Server | `sqlserver` |
 
-Por padrão, a gem detecta o dialeto pela configuração de banco do projeto Rails, sem abrir conexão. O destino seleciona o dialeto do compilador; não representa uma conexão ativa com o banco. Use `TARGET=all` para gerar arquivos para todos os dialetos.
+By default, the gem detects the dialect from the Rails database configuration without opening a connection. `TARGET` selects the SQL compiler, not a database connection. Use `TARGET=all` to generate every supported dialect.
 
-## Configuração
+## Configuration
 
-Edite `config/initializers/rails_migrations2sql.rb`:
+Configure `config/initializers/rails_migrations2sql.rb`:
 
 ```ruby
 RailsMigrations2sql.configure do |config|
@@ -122,22 +114,22 @@ RailsMigrations2sql.configure do |config|
 end
 ```
 
-| Opção | Padrão | Finalidade |
+| Option | Default | Purpose |
 |---|---|---|
-| `target` | `auto` | Detecta o adapter do banco principal do ambiente Rails atual; aceita um dialeto explícito. |
-| `output_path` | `db/sql` na raiz da aplicação | Diretório dos pacotes gerados. |
-| `migrations_paths` | Caminhos do Active Record ou `db/migrate` | Diretórios de migrations. |
-| `seeds_path` | `db/seeds.rb` na raiz da aplicação | Seed Rails compilado automaticamente quando existe. |
-| `sql_seeds_path` | `seeds_sql.rb` ao lado de `seeds_path` | Exportação SQL explícita; tem preferência sobre o seed Rails. |
-| `strict` | `true` | Interrompe a compilação para operações não suportadas. |
-| `use_schema_snapshot` | `false` | Carrega um schema virtual a partir de `schema.rb`. |
-| `schema_path` | `db/schema.rb` na raiz da aplicação | Arquivo do snapshot opcional. |
-| `primary_key_type` | `bigint` | Tipo padrão de chave primária. |
-| `schema_migrations_table_name` | `schema_migrations` | Tabela usada pelo registro de versão ao final de cada SQL. |
+| `target` | `auto` | Detects the current environment's primary database adapter, or accepts an explicit dialect. |
+| `output_path` | `db/sql` | Directory for generated files. |
+| `migrations_paths` | Active Record paths or `db/migrate` | Migration directories. |
+| `seeds_path` | `db/seeds.rb` | Rails seed file compiled when present. |
+| `sql_seeds_path` | `seeds_sql.rb` next to `seeds_path` | Explicit SQL seed export; takes precedence. |
+| `strict` | `true` | Rejects unsupported operations. |
+| `use_schema_snapshot` | `false` | Loads a virtual schema from `schema.rb`. |
+| `schema_path` | `db/schema.rb` | Optional schema snapshot path. |
+| `primary_key_type` | `bigint` | Default primary key type. |
+| `schema_migrations_table_name` | `schema_migrations` | Version-tracking table. |
 
-O initializer gerado usa `config.target = :auto`. A gem consulta a configuração já resolvida pelo Rails (incluindo `database.yml` e `DATABASE_URL` quando aplicável), sem consultar o servidor. Em projetos com vários bancos, escolhe `primary`; se esse nome não existir, usa a primeira configuração habilitada para tarefas de banco no ambiente atual.
+Auto detection uses Rails-resolved configuration, including `database.yml` and `DATABASE_URL`, without querying the server. In a multi-database project it uses `primary`, or the first database-task-enabled configuration when no `primary` configuration exists.
 
-| Adapter Rails | Dialeto detectado |
+| Rails adapter | Detected dialect |
 |---|---|
 | `postgresql` | `postgresql` |
 | `mysql2`, `trilogy`, `mysql` | `mysql` |
@@ -145,141 +137,96 @@ O initializer gerado usa `config.target = :auto`. A gem consulta a configuraçã
 | `oracle_enhanced`, `oracle` | `oracle` |
 | `sqlserver` | `sqlserver` |
 
-MariaDB normalmente usa `mysql2`, que não permite distingui-lo de MySQL apenas pela configuração. Para selecionar o dialeto MariaDB, use `config.target = :mariadb` ou `TARGET=mariadb`.
+MariaDB commonly uses `mysql2`, so it cannot always be distinguished from MySQL. Set `config.target = :mariadb` or `TARGET=mariadb` when needed. Unsupported adapters, including `sqlite3`, require an explicit target.
 
-Sem configuração de banco ou com um adapter não suportado, como `sqlite3`, a gem informa um erro e pede um destino explícito. Ela não assume PostgreSQL. Se você já instalou a gem, troque a atribuição antiga do initializer por `config.target = :auto` para ativar a detecção.
+## Commands
 
-## Comandos
-
-Execute na raiz da aplicação Rails:
+Run commands from the Rails application root:
 
 ```bash
-# Comando mais simples: migration mais recente, no banco configurado
+# Latest migration for the configured database
 bin/rails dba:sql
 
-# Da versão informada até a última migration, incluindo a versão inicial
+# From a version through the latest available migration
 bin/rails dba:sql FROM=20260923130000
 
-# Todos os arquivos de migration
+# All migration files
 bin/rails dba:sql:all
 
-# Seleção explícita da mais recente
+# Explicit latest-migration selection
 bin/rails dba:sql:latest
 
-# Gerar somente migrations, sem atualizar seed.sql
+# Migrations only; do not update seed.sql
 bin/rails dba:sql FROM=20260923130000 SEEDS=0
 
-# Gerar somente o seed, sem gerar migrations
+# Seed only
 bin/rails dba:sql:seeds
 
-# Uma versão
+# One or more explicit versions
 bin/rails dba:sql VERSION=20260923130000
-
-# Várias versões
 bin/rails dba:sql VERSIONS=20260923130000,20260923131500
 
-# Intervalo inclusivo de versões
+# Inclusive version range
 bin/rails dba:sql FROM=20260923000000 TO=20260923999999
 
-# Alternativa para selecionar todos os arquivos
+# All files or all target dialects
 bin/rails dba:sql ALL=1
-
-# Escolher outro banco apenas para esta execução
-bin/rails dba:sql TARGET=oracle
-
-# Uma versão em todos os dialetos
 bin/rails dba:sql VERSION=20260923130000 TARGET=all
+
+# Override the configured target for one invocation
+bin/rails dba:sql TARGET=oracle
 ```
 
-### Dados do seed
+Without a selection, `dba:sql` compiles the highest-version migration. `FROM` and `TO` must contain digits only, and `FROM` cannot be greater than `TO`. Selection considers migration files only; it never checks which migrations have already been applied.
 
-`dba:sql`, `dba:sql:all` e `dba:sql:latest` geram as migrations e atualizam automaticamente `db/sql/<dialeto>/seed.sql`. Sem arquivo de seeds, geram apenas migrations. Use `SEEDS=0` para desabilitar os seeds ou `SEEDS=1` para exigir que existam. Para gerar apenas esse arquivo, execute `bin/rails dba:sql:seeds`; `TARGET=all` funciona nos dois fluxos, desde que o exportador suporte os destinos solicitados. O arquivo é sobrescrito em uma nova geração e deve ser executado **depois** das migrations que criam as tabelas e colunas usadas pelos dados.
+## Seed data
 
-A compilação offline aceita `Model.create`, `Model.create!`, `Model.insert_all`, `Model.insert_all!` e `Model.find_or_create_by`/`find_or_create_by!` com atributos explícitos e valores escalares. Também aceita arrays de registros. Cada registro vira um `INSERT`; `find_or_create_by` gera uma inserção condicional com `WHERE NOT EXISTS`. A ordem dos registros no seed é preservada. IDs, timestamps e outros valores exigidos pelo banco precisam ser informados nos atributos ou definidos por default no schema. O gerador não executa validações, callbacks nem preenchimento automático de timestamps do Active Record.
+`dba:sql`, `dba:sql:all`, and `dba:sql:latest` automatically update `db/sql/<dialect>/seed.sql`. Without a seed file, they generate only migrations. Use `SEEDS=0` to disable seed generation or `SEEDS=1` to require a seed file. Run `bin/rails dba:sql:seeds` to generate the seed alone.
 
-Consultas e comandos dependentes de resultados do banco, como `where`, `first` e uso de IDs gerados automaticamente, não podem ser convertidos sem conexão e geram erro. Blocos de `create` e `find_or_create_by` podem preencher atributos do registro antes do `INSERT`, inclusive `create!` sem atributos iniciais. Aliases declarados com `alias_attribute` são convertidos nos nomes reais das colunas, também nas condições de `find_or_create_by`. Opções de `insert_all` são rejeitadas. Como o arquivo Ruby é carregado durante a geração, use apenas seeds confiáveis e revise o SQL antes da execução.
+Each generation overwrites the single `seed.sql` file for the target. Run it after the migrations that create its required tables and columns.
 
-Se um seed usa consultas como `SiteSetting.first_or_initialize`, forneça uma exportação explícita em `db/seeds_sql.rb`. Consultas ao banco continuam bloqueadas durante a geração. Para gerar somente migrations, use `SEEDS=0`. Erros de Ruby e operações não suportadas em seeds identificam o arquivo e, quando disponível, a linha da falha. Arquivos `seed.sql` de execuções anteriores são preservados; execute somente os arquivos listados pela geração atual.
+Offline compilation supports `Model.create`, `Model.create!`, `Model.insert_all`, `Model.insert_all!`, and `Model.find_or_create_by`/`find_or_create_by!` with explicit scalar attributes. Every record becomes an `INSERT`; `find_or_create_by` becomes an `INSERT ... WHERE NOT EXISTS`. Record order is preserved.
 
-Na API Ruby, `seeds: :auto` é o padrão; `seeds: false` desabilita a exportação e `seeds: true` exige um arquivo. Essa versão restaura os seeds automáticos, desabilitados na versão 0.0.2.
+The generator does not run validations, callbacks, or automatic Active Record timestamps. Provide IDs, timestamps, and other required values explicitly, or rely on schema defaults.
 
-### Seeds que dependem de consultas e serviços
+Database-dependent operations such as `where`, `first`, or using generated IDs cannot be compiled offline. They raise an error. Attribute aliases declared through `alias_attribute` are resolved to their actual column names.
 
-Crie `db/seeds_sql.rb` com a tradução explícita das operações de dados. O arquivo é avaliado uma vez por dialeto e oferece `target`, `quote`, `quote_table`, `quote_column`, `sql`, `insert`, `update` e `execute`:
+For seeds that need query-dependent logic, write `db/seeds_sql.rb`. It is evaluated once per target dialect and offers `target`, `quote`, `quote_table`, `quote_column`, `sql`, `insert`, `update`, and `execute`:
 
 ```ruby
 now = sql("CURRENT_TIMESTAMP")
 lookup = { email: "admin@example.com" }
-insert :users, lookup.merge(name: "Administrador", created_at: now, updated_at: now),
+
+insert :users, lookup.merge(name: "Administrator", created_at: now, updated_at: now),
   unless_exists: lookup
-update :users, { name: "Administrador", updated_at: now }, where: lookup
+update :users, { name: "Administrator", updated_at: now }, where: lookup
 ```
 
-`sql(...)` representa uma expressão que será avaliada pelo banco quando o DBA executar o arquivo. `execute(...)` apenas acrescenta SQL ao arquivo; não abre conexão. Valores normais são escapados pelo compilador do destino. O exportador precisa fornecer timestamps, associações e qualquer regra que dependa de callbacks. Compartilhe os dados entre o seed Rails e o exportador, por exemplo em JSON.
+`sql(...)` represents a database expression. `execute(...)` appends SQL without opening a connection. Use only trusted seed files, and review generated SQL before execution.
 
-O arquivo é procurado ao lado do `seeds_path` configurado. Para outro caminho, use `config.sql_seeds_path = Rails.root.join("db", "export_seed.rb")`. Quando esse caminho é explícito, sua ausência gera erro. Uma falha em qualquer seed ou dialeto preserva os SQLs existentes; não há exportação parcial silenciosa.
+## Supported operations
 
-### Da versão inicial até a última migration
+The compiler supports these common migration DSL operations:
 
-Para gerar um lote a partir de uma versão conhecida, informe apenas `FROM`:
+- Tables: `create_table`, `drop_table`, `rename_table`, `create_join_table`, `drop_join_table`, and `change_table`.
+- Columns: `add_column`, `remove_column`, `remove_columns`, `rename_column`, `change_column`, `change_column_default`, and `change_column_null`.
+- Indexes: `add_index`, `remove_index`, and `rename_index`.
+- References: `add_reference` and `remove_reference`, including `belongs_to` aliases.
+- Constraints: `add_foreign_key`, `remove_foreign_key`, `add_check_constraint`, and `remove_check_constraint`.
+- Timestamps: `add_timestamps` and `remove_timestamps`.
+- Direction control: `reversible`, `up_only`, and block-form `revert`.
+- Literal SQL: `execute`.
+- PostgreSQL extensions: `enable_extension` and `disable_extension`.
 
-```bash
-bin/rails dba:sql FROM=20260923130000
-```
+In `create_table`, supported definitions include `string`, `text`, `integer`, `bigint`, `decimal`, `boolean`, `date`, `datetime`, `timestamp`, `binary`, `json`, `jsonb`, `uuid`, `references`, `timestamps`, `index`, and `foreign_key`.
 
-Esse comando inclui `20260923130000` e todas as migrations posteriores disponíveis nos arquivos do projeto, em ordem crescente de versão. Não é necessário informar `TO` nem conhecer a última versão: o limite final é a maior versão disponível. Cada migration gera seu próprio arquivo SQL.
+The virtual schema tracks tables, primary keys, references, and columns added within the same batch. This lets operations such as `add_column` followed by `change_column_null` use the current type without a snapshot. Dialect-specific options are supported only where the target compiler translates them; strict mode rejects unsupported options.
 
-Use `FROM` para esse lote; `VERSION=20260923130000` seleciona somente aquela migration. A seleção não consulta o banco para verificar quais versões já foram aplicadas. `FROM` e `TO` devem conter somente dígitos, com `FROM` menor ou igual a `TO`; valores inválidos interrompem a geração.
+## Migrations, literal SQL, and snapshots
 
-Para gerar o mesmo lote em outro dialeto:
+Write migrations normally using `change` or `up`. The gem evaluates `change` when present, otherwise `up`, once for each target dialect. The `down` method and `dir.down` blocks are not evaluated; this gem does not generate rollback SQL.
 
-```bash
-bin/rails dba:sql FROM=20260923130000 TARGET=oracle
-```
-
-### Banco de destino e parâmetros opcionais
-
-`TARGET` não é obrigatório. A prioridade é: `TARGET` na execução, um `config.target` explícito no initializer e, no modo `auto`, `RAILS_DBA_TARGET` ou a detecção do banco do ambiente Rails atual. Por exemplo, `RAILS_ENV=production bin/rails dba:sql FROM=20260923130000` usa a configuração de produção.
-
-`VERSION`, `VERSIONS`, `FROM`, `TO`, `ALL` e `TARGET` são parâmetros opcionais. Sem seleção, a tarefa usa o arquivo de maior versão. A seleção considera os arquivos disponíveis, sem consultar quais migrations já foram aplicadas no banco.
-
-## Operações suportadas
-
-O compilador cobre as operações estruturais comuns da DSL:
-
-- Tabelas: `create_table`, `drop_table`, `rename_table`, `create_join_table`, `drop_join_table` e `change_table`.
-- Colunas: `add_column`, `remove_column`, `remove_columns`, `rename_column`, `change_column`, `change_column_default` e `change_column_null`.
-- Índices: `add_index`, `remove_index` e `rename_index`.
-- Referências: `add_reference` e `remove_reference`, incluindo aliases de `belongs_to`.
-- Restrições: `add_foreign_key`, `remove_foreign_key`, `add_check_constraint` e `remove_check_constraint`.
-- Timestamps: `add_timestamps` e `remove_timestamps`.
-- Controle de direção: `reversible`, `up_only` e `revert` com bloco.
-- SQL literal: `execute`.
-- Extensões do PostgreSQL: `enable_extension` e `disable_extension`.
-
-Em `create_table`, estão disponíveis chamadas como `string`, `text`, `integer`, `bigint`, `decimal`, `boolean`, `date`, `datetime`, `timestamp`, `binary`, `json`, `jsonb`, `uuid`, `references`, `timestamps`, `index` e `foreign_key`.
-
-`change_column_null :users, :active, false, false`, por exemplo, gera um `UPDATE` dos valores nulos antes de aplicar `NOT NULL`, preservando o valor booleano informado. Defaults com `from:`/`to:` também preservam `false`.
-
-Nomes automáticos de foreign keys compostas e check constraints seguem o algoritmo do Active Record. Ao remover uma constraint criada por um SQL antigo da gem com um nome diferente, informe o nome existente em `name:`.
-
-O schema virtual acompanha chaves primárias, join tables, referências e colunas adicionadas no próprio lote. Assim, `add_column` seguido de `change_column_null` pode fornecer o tipo necessário sem snapshot. Índices inline (`t.string :email, index: true`) são incluídos no SQL; a remoção de um índice conhecido preserva seu nome explícito.
-
-No PostgreSQL, `change_column` preserva `using:`/`cast_as:` e índices aceitam expressões e as condições `if_not_exists:`/`if_exists:`. Opções de índices sem tradução implementada para o destino são rejeitadas em modo estrito.
-
-Literais Unicode do SQL Server usam o prefixo `N`, conforme a [documentação de constantes da Microsoft](https://learn.microsoft.com/en-us/sql/t-sql/data-types/constants-transact-sql). Textos com barras invertidas em MySQL/MariaDB usam literais hexadecimais UTF-8 para preservar o conteúdo independentemente de `NO_BACKSLASH_ESCAPES`; veja a [documentação de introducers do MySQL](https://dev.mysql.com/doc/refman/8.0/en/charset-introducer.html). Valores numéricos sem representação suportada, como `NaN`, infinito, complexos e racionais, são rejeitados.
-
-As opções disponíveis variam conforme o dialeto. O suporte a uma operação não implica suporte a todas as opções dos adapters do Active Record.
-
-## Aplicação da migration e SQL literal
-
-Escreva a migration normalmente com `change` ou `up`. A gem avalia `change` quando ele está definido; caso contrário, avalia `up`. O corpo selecionado é avaliado uma única vez por migration e dialeto. Não é necessário converter a DSL para `execute`.
-
-Cada arquivo de migration e o snapshot são carregados uma vez por chamada de geração. Cada dialeto mantém seu próprio schema virtual, atualizado entre migrations sem copiar toda a estrutura a cada avaliação. O corpo de `change`/`up` continua sendo avaliado por dialeto, inclusive quando consulta `connection.adapter_name`. Uma nova chamada de geração recarrega os arquivos em namespaces isolados, evitando que métodos removidos permaneçam ativos na próxima execução. Classes de migrations devem ser declaradas normalmente (`class NomeDaMigration`), sem forçar constantes globais com `class ::NomeDaMigration`. Versões duplicadas nos diretórios configurados interrompem a geração.
-
-O método `down` e os blocos `dir.down` de `reversible` não são avaliados. A gem não gera scripts de rollback nem exige que `change` seja reversível. `up_only` e blocos `dir.up` são incluídos. Um `revert` explícito dentro de `change` ou `up` continua sendo uma operação de aplicação e precisa ser reversível para ser compilado.
-
-Use `execute` quando a própria migration precisar conter SQL literal:
+Use `execute` when the migration itself needs literal SQL:
 
 ```ruby
 def change
@@ -290,25 +237,9 @@ def change
 end
 ```
 
-O conteúdo de `execute` é emitido como escrito, sem consultar nem alterar o banco durante a geração. Ele não retorna resultados de consultas para decisões Ruby. Sua compatibilidade com o banco de destino é responsabilidade de quem escreve a migration.
+Literal SQL is emitted exactly as written. Its compatibility with the selected target is the migration author's responsibility. Query methods such as `select_value`, `select_all`, and `exec_query` require a real database and raise `UnsupportedOperationError`.
 
-### Consultas que dependem de dados
-
-Métodos como `select_value`, `select_values`, `select_all`, `select_rows`, `select_one`, `exec_query` e `exec_select` exigem um banco real e são rejeitados com `UnsupportedOperationError`, tanto diretamente na migration quanto por `connection`.
-
-Por exemplo, `connection.select_value("SELECT COUNT(*) FROM artigos WHERE categoria IS NULL")` não pode fornecer um resultado durante a compilação offline. Use SQL explícito para a operação de dados, quando isso representar a regra desejada, ou um script separado de manutenção revisado pelo DBA. Mudar apenas o nome da chamada para `execute` não resolve uma condição Ruby que depende do valor consultado.
-
-## Snapshot opcional de schema
-
-Predicados como `column_exists?` podem precisar de informações sobre a estrutura anterior:
-
-```ruby
-if column_exists?(:users, :legacy_code)
-  remove_column :users, :legacy_code, :string
-end
-```
-
-Para fornecer essas informações, habilite o carregamento de `schema.rb` em memória:
+For predicates that require prior schema information, enable an in-memory `schema.rb` snapshot:
 
 ```ruby
 RailsMigrations2sql.configure do |config|
@@ -317,23 +248,25 @@ RailsMigrations2sql.configure do |config|
 end
 ```
 
-O snapshot não é aplicado ao banco. Quando habilitado, o arquivo deve existir; caminhos `Pathname`, como `Rails.root.join(...)`, são aceitos. Ele deve representar o estado imediatamente anterior à primeira migration selecionada; deixe a opção desabilitada se o arquivo não corresponder a esse estado.
+The snapshot is never applied to a database. It must represent the state immediately before the first selected migration.
 
-## Fluxo de execução pelo DBA
+## DBA execution flow
 
-1. Gere os arquivos para o banco de destino.
-2. Revise cada `<versão>_<nome>.sql`.
-3. Execute os arquivos SQL em ordem crescente de versão, em um cliente configurado para interromper em caso de erro.
-4. Execute `seed.sql`, quando gerado, após as migrations necessárias.
-5. Valide as alterações, os dados e o registro das versões em `schema_migrations`.
+1. Generate SQL for the target database.
+2. Review each `<version>_<name>.sql` file.
+3. Run migration files in ascending version order with a client that stops on errors.
+4. Run `seed.sql`, if generated, after the required migrations.
+5. Validate the data and `schema_migrations` entries.
 
-Cada arquivo contém as operações da migration e, ao final, o `INSERT` da versão. A tabela de controle deve existir e a versão ainda não deve estar registrada. O script não adiciona uma transação global: o registro final só deve ser executado se todas as operações anteriores tiverem sucesso. A gem não gera rollback.
+Each migration file ends with a version `INSERT`. The version-tracking table must exist, and the version must not already be present. The gem does not add a global transaction or generate rollback scripts.
 
-## Funcionamento e limitações
+## Limitations
 
-A classe da migration e o arquivo de seeds, quando solicitado, são carregados como Ruby. O `MigrationSandbox` registra as operações da DSL de migrations; o `SeedRecorder` captura as inserções suportadas do seed. Os compiladores e gravadores produzem os arquivos SQL por dialeto.
+The generator temporarily replaces Active Record's connection handler in the current execution context. Acquiring or creating a connection through Active Record raises `UnsupportedOperationError`, and the previous handler is restored even after a failure.
 
-O compilador não consulta dados da aplicação para decidir o que gerar. Migrations que dependem de modelos ou consultas, como as abaixo, ficam fora do fluxo offline suportado:
+This is not complete Ruby isolation. Existing connection objects or pools, external database clients, new threads, code that replaces the handler, and arbitrary side effects are outside this guard. Rails initializes before the guard runs. Compile only trusted migrations and seeds.
+
+Model- or query-dependent migrations are outside the supported offline flow:
 
 ```ruby
 Order.where(status: nil).update_all(status: "pending")
@@ -343,17 +276,9 @@ if Order.count > 1_000_000
 end
 ```
 
-Trate essas alterações como scripts explícitos de manutenção de dados ou SQL revisado pelo DBA. Durante a geração, a gem substitui temporariamente o gerenciador de conexões ActiveRecord no contexto de execução atual. A obtenção ou criação de conexões por modelos é bloqueada com `UnsupportedOperationError`; o gerenciador anterior é restaurado mesmo em caso de falha. Isso também vale durante o carregamento dos arquivos de migration e do snapshot.
+Treat such work as explicit DBA-reviewed maintenance SQL.
 
-Essa proteção não é um isolamento completo de Ruby: conexões ou pools guardados previamente, clientes de banco externos ao ActiveRecord, novas threads, código que substitua o gerenciador e efeitos colaterais arbitrários ficam fora do bloqueio. A inicialização da aplicação Rails ocorre antes da proteção. Compile apenas migrations e seeds confiáveis e não use esses caminhos para acessar bancos durante a geração.
-
-Algumas operações dependem do tipo atual da coluna ou de recursos específicos do servidor. Exemplos incluem alterar nulabilidade no MySQL, MariaDB ou SQL Server, índices específicos de cada banco e extensões de adapters. O modo estrito interrompe operações não suportadas.
-
-A versão `0.0.1` representa a implementação inicial do compilador offline. Revise o SQL e valide-o nas versões de banco utilizadas pela equipe antes da adoção em produção.
-
-## Desenvolvimento e testes
-
-Para trabalhar no código da gem:
+## Development and tests
 
 ```bash
 git clone https://github.com/alexishida/rails_migrations2sql.git
@@ -362,24 +287,22 @@ bundle install
 bundle exec rake test
 ```
 
-Neste repositório, o `Gemfile` usa `gemspec` para carregar a gem local e instalar suas dependências de desenvolvimento. A declaração com `git:` da seção de instalação pertence às aplicações consumidoras.
+This repository's `Gemfile` uses `gemspec` to load the local gem. The test suite uses Minitest, and `bundle exec rake` runs it.
 
-A suíte usa Minitest; a tarefa padrão `bundle exec rake` também executa os testes.
-
-| Caminho | Responsabilidade |
+| Path | Responsibility |
 |---|---|
-| [lib/rails_migrations2sql/](lib/rails_migrations2sql/) | Descoberta e avaliação de migrations e seeds, schema virtual e geração dos pacotes. |
-| [lib/rails_migrations2sql/compilers/](lib/rails_migrations2sql/compilers/) | Compiladores dos dialetos SQL. |
-| [lib/tasks/rails_migrations2sql.rake](lib/tasks/rails_migrations2sql.rake) | Tarefas `dba:sql` e `dba:sql:seeds`. |
-| [lib/generators/rails_migrations2sql/](lib/generators/rails_migrations2sql/) | Gerador do initializer de configuração. |
-| [test/](test/) | Testes do compilador offline. |
+| [lib/rails_migrations2sql/](lib/rails_migrations2sql/) | Migration and seed discovery/evaluation, virtual schema, and package generation. |
+| [lib/rails_migrations2sql/compilers/](lib/rails_migrations2sql/compilers/) | SQL dialect compilers. |
+| [lib/tasks/rails_migrations2sql.rake](lib/tasks/rails_migrations2sql.rake) | `dba:sql` and `dba:sql:seeds` tasks. |
+| [lib/generators/rails_migrations2sql/](lib/generators/rails_migrations2sql/) | Configuration initializer generator. |
+| [test/](test/) | Offline compiler tests. |
 
-## Contribuição e licença
+## Contributing and license
 
-Relate problemas nas [issues](https://github.com/alexishida/rails_migrations2sql/issues), incluindo a migration, o dialeto e o resultado esperado. Para contribuir, envie um pull request com a alteração e os testes pertinentes.
+Report problems in the [issues](https://github.com/alexishida/rails_migrations2sql/issues), including the migration, target dialect, and expected result. Contributions should include relevant tests.
 
-Distribuído sob a [licença MIT](LICENSE.txt).
+Distributed under the [MIT License](LICENSE.txt).
 
-## Benchmark da geração
+## Generation benchmark
 
-Execute `bundle exec ruby benchmark/generation.rb` para gerar 600 arquivos temporários (120 migrations, 20 colunas por tabela, cinco dialetos), medir tempo e alocações e remover os arquivos ao terminar. Use `MIGRATIONS=240` para variar o volume. A medição cobre a compilação e a escrita dos arquivos, sem conexão com bancos.
+Run `bundle exec ruby benchmark/generation.rb` to generate 600 temporary files (120 migrations, 20 columns per table, five dialects), measure time and allocations, and remove the files when it finishes. Use `MIGRATIONS=240` to change the volume. The benchmark covers compilation and file writing without database connections.
