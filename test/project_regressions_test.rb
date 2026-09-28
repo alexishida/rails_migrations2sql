@@ -5,7 +5,7 @@ require "tmpdir"
 
 class ProjectRegressionsTest < Minitest::Test
   def evaluate(target = :postgresql, &block)
-    klass = Class.new(ActiveRecord::Migration[8.0])
+    klass = Class.new(ActiveRecord::Migration[MIGRATION_VERSION])
     klass.define_method(:change, &block)
     compiler = RailsMigrations2sql::CompilerFactory.build(target)
     result = RailsMigrations2sql::MigrationEvaluator.new(
@@ -68,7 +68,7 @@ class ProjectRegressionsTest < Minitest::Test
   def test_snapshot_accepts_pathname_and_contains_the_primary_key
     Dir.mktmpdir do |root|
       path = Pathname.new(root).join("schema.rb")
-      path.write("ActiveRecord::Schema[8.0].define(version: 1) do\n  create_table :users do |t|\n    t.string :name\n  end\nend\n")
+      path.write("ActiveRecord::Schema[#{MIGRATION_VERSION}].define(version: 1) do\n  create_table :users do |t|\n    t.string :name\n  end\nend\n")
       schema = RailsMigrations2sql::SchemaLoader.new(path).load
       assert schema.column_exists?(:users, :id, :bigint)
     end

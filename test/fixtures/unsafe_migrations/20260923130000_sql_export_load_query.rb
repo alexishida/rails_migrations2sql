@@ -1,4 +1,4 @@
-class SqlExportLoadQuery < ActiveRecord::Migration[8.0]
+class SqlExportLoadQuery < ActiveRecord::Migration[7.0]
   ActiveRecord::Base.connection_pool
 
   def change

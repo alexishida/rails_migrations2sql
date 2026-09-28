@@ -1,0 +1,12 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec path: ".."
+
+%w[activerecord activesupport railties].each do |name|
+  gem name, ENV.fetch("RAILS_VERSION")
+end
+
+gem "rake"
+gem "minitest", "~> 5.0"

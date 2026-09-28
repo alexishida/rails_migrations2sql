@@ -4,7 +4,7 @@ module RailsMigrations2sql
   class MigrationLoader
     def load_class(migration_file)
       namespace = Module.new
-      load migration_file.path, namespace
+      namespace.module_eval(File.read(migration_file.path), migration_file.path, 1)
       klass = namespace.const_get(migration_file.class_name, false) if namespace.const_defined?(migration_file.class_name, false)
       return klass if migration_class?(klass)
 

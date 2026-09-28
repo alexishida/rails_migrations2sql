@@ -1,4 +1,4 @@
-class SqlExportPopulateArticles < ActiveRecord::Migration[8.0]
+class SqlExportPopulateArticles < ActiveRecord::Migration[7.0]
   def change
     execute "UPDATE articles SET category = 'general' WHERE category IS NULL"
     reversible do |direction|

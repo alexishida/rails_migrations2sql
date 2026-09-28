@@ -8,7 +8,7 @@ Dir.mktmpdir("sql-generation-benchmark") do |root|
   count = Integer(ENV.fetch("MIGRATIONS", "120"))
   count.times do |index|
     File.write(File.join(migrations, "#{20260101000000 + index}_benchmark_migration#{index}.rb"), <<~SOURCE)
-      class BenchmarkMigration#{index} < ActiveRecord::Migration[8.0]
+      class BenchmarkMigration#{index} < ActiveRecord::Migration[#{ActiveRecord::VERSION::MAJOR}.#{ActiveRecord::VERSION::MINOR}]
         def change
           create_table :benchmark_table_#{index} do |t|
             #{20.times.map { |column| "t.string :column_#{column}, default: 'value'" }.join("\n")}

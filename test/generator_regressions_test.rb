@@ -14,7 +14,7 @@ class GeneratorRegressionsTest < Minitest::Test
       Dir.mkdir(migrations)
       File.write(File.join(migrations, "20260101000000_generator_probe.rb"), <<~SOURCE)
         GeneratorRegressionsTest.loads += 1
-        class GeneratorProbe < ActiveRecord::Migration[8.0]
+        class GeneratorProbe < ActiveRecord::Migration[#{MIGRATION_VERSION}]
           def change
             GeneratorRegressionsTest.evaluations << connection.adapter_name
             raise "Schema leaked between targets" if column_exists?(:existing, :visited)
@@ -25,7 +25,7 @@ class GeneratorRegressionsTest < Minitest::Test
       SOURCE
       File.write(File.join(migrations, "20260101000001_generator_followup.rb"), <<~SOURCE)
         GeneratorRegressionsTest.loads += 1
-        class GeneratorFollowup < ActiveRecord::Migration[8.0]
+        class GeneratorFollowup < ActiveRecord::Migration[#{MIGRATION_VERSION}]
           def change
             raise "Schema was lost between migrations" unless column_exists?(:existing, :visited)
             add_column :events, :name, :string
@@ -34,7 +34,7 @@ class GeneratorRegressionsTest < Minitest::Test
       SOURCE
       snapshot = File.join(root, "schema.rb")
       File.write(snapshot, <<~SOURCE)
-        ActiveRecord::Schema[8.0].define(version: 0) do
+        ActiveRecord::Schema[#{MIGRATION_VERSION}].define(version: 0) do
           GeneratorRegressionsTest.snapshot_loads += 1
           create_table(:existing) { |t| t.string :name }
         end
@@ -138,7 +138,7 @@ class GeneratorRegressionsTest < Minitest::Test
       generator.generate(version: "20260101000000", target: :postgresql)
       path = Dir[File.join(config.migrations_paths.first, "*.rb")].sort.first
       File.write(path, <<~RUBY)
-        class GeneratorProbe < ActiveRecord::Migration[8.0]
+        class GeneratorProbe < ActiveRecord::Migration[#{MIGRATION_VERSION}]
           def up
             execute "SELECT 'new up method'"
           end

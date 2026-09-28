@@ -1,4 +1,4 @@
-class SqlExportCreateArticles < ActiveRecord::Migration[8.0]
+class SqlExportCreateArticles < ActiveRecord::Migration[7.0]
   def change
     create_table :articles do |table|
       table.string :category

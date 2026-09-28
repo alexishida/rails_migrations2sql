@@ -49,7 +49,13 @@ module RailsMigrations2sql
     end
 
     def default_foreign_key_name(table, column)
-      digest = Digest::SHA256.hexdigest("#{table}_#{Array(column).join('_and_')}_fk")[0, 10]
+      # Rails 7.0 interpolates the column directly; 7.1+ joins composite keys.
+      columns = if ActiveRecord::VERSION::MAJOR == 7 && ActiveRecord::VERSION::MINOR == 0
+        column
+      else
+        Array(column).join("_and_")
+      end
+      digest = Digest::SHA256.hexdigest("#{table}_#{columns}_fk")[0, 10]
       "fk_rails_#{digest}"
     end
 

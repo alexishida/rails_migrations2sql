@@ -22,3 +22,5 @@ require "rails_migrations2sql/compilers/sqlserver"
 require "rails_migrations2sql/migration_file"
 require "rails_migrations2sql/migration_evaluator"
 require "rails_migrations2sql"
+
+MIGRATION_VERSION = "#{ActiveRecord::VERSION::MAJOR}.#{ActiveRecord::VERSION::MINOR}".to_f

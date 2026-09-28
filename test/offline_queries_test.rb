@@ -9,7 +9,7 @@ class OfflineQueriesTest < Minitest::Test
 
   %i[select_value select_values select_all select_rows select_one exec_query exec_select].each do |query|
     define_method("test_direct_#{query}_reports_an_offline_error") do
-      migration = Class.new(ActiveRecord::Migration[8.0]) do
+      migration = Class.new(ActiveRecord::Migration[MIGRATION_VERSION]) do
         define_method(:up) { public_send(query, "SELECT COUNT(*) FROM articles", prepare: false) }
       end
 
@@ -19,7 +19,7 @@ class OfflineQueriesTest < Minitest::Test
     end
 
     define_method("test_connection_#{query}_reports_an_offline_error") do
-      migration = Class.new(ActiveRecord::Migration[8.0]) do
+      migration = Class.new(ActiveRecord::Migration[MIGRATION_VERSION]) do
         define_method(:change) { connection.public_send(query, "SELECT COUNT(*) FROM articles") }
       end
 
@@ -29,7 +29,7 @@ class OfflineQueriesTest < Minitest::Test
   end
 
   def test_down_with_query_is_never_evaluated
-    migration = Class.new(ActiveRecord::Migration[8.0]) do
+    migration = Class.new(ActiveRecord::Migration[MIGRATION_VERSION]) do
       def up = add_column(:articles, :category, :string)
       def down = select_value("SELECT COUNT(*) FROM articles")
     end
@@ -39,7 +39,7 @@ class OfflineQueriesTest < Minitest::Test
 
   def test_change_is_evaluated_once_and_takes_precedence_over_up
     calls = 0
-    migration = Class.new(ActiveRecord::Migration[8.0]) do
+    migration = Class.new(ActiveRecord::Migration[MIGRATION_VERSION]) do
       define_method(:change) do
         calls += 1
         execute "UPDATE articles SET category = 'general'"
@@ -54,7 +54,7 @@ class OfflineQueriesTest < Minitest::Test
   end
 
   def test_model_reads_are_blocked
-    migration = Class.new(ActiveRecord::Migration[8.0]) do
+    migration = Class.new(ActiveRecord::Migration[MIGRATION_VERSION]) do
       define_method(:up) { Article.count }
     end
 
@@ -63,7 +63,7 @@ class OfflineQueriesTest < Minitest::Test
   end
 
   def test_model_writes_are_blocked
-    migration = Class.new(ActiveRecord::Migration[8.0]) do
+    migration = Class.new(ActiveRecord::Migration[MIGRATION_VERSION]) do
       define_method(:up) { Article.where(category: nil).update_all(category: "general") }
     end
 
@@ -80,7 +80,7 @@ class OfflineQueriesTest < Minitest::Test
     end
     ActiveRecord::Base.connection_handler = handler
 
-    migration = Class.new(ActiveRecord::Migration[8.0]) do
+    migration = Class.new(ActiveRecord::Migration[MIGRATION_VERSION]) do
       define_method(:up) { Article.count }
     end
 

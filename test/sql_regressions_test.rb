@@ -179,9 +179,15 @@ class SqlRegressionsTest < Minitest::Test
   def test_constraint_names_match_active_record
     adapter = ActiveRecord::ConnectionAdapters::AbstractAdapter.new(adapter: "abstract")
     compiler = RailsMigrations2sql::Compilers::PostgreSQL.new
-    columns = [:user_id, :tenant_id]
-    name = adapter.send(:foreign_key_name, "orders", column: columns)
-    assert_equal name, RailsMigrations2sql::Util.default_foreign_key_name("orders", columns)
+    [:user_id, [:user_id, :tenant_id]].each do |columns|
+      name = adapter.send(:foreign_key_name, "orders", column: columns)
+      assert_equal name, RailsMigrations2sql::Util.default_foreign_key_name("orders", columns)
+      operations = [
+        operation(:add_foreign_key, :orders, :users, column: columns),
+        operation(:remove_foreign_key, :orders, :users, column: columns)
+      ]
+      compiler.compile(operations).each { |sql| assert_includes sql, compiler.quote_identifier(name) }
+    end
     name = adapter.send(:check_constraint_name, "orders", expression: "total > 0")
     sql = compiler.compile([operation(:add_check_constraint, :orders, "total > 0")]).first
     assert_includes sql, compiler.quote_identifier(name)
