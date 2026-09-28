@@ -19,6 +19,8 @@ module RailsMigrations2sql
                   :migrations_paths,
                   :seeds_path,
                   :sql_seeds_path,
+                  :seed_sources,
+                  :seed_sources_root,
                   :schema_path,
                   :use_schema_snapshot,
                   :strict,
@@ -30,6 +32,8 @@ module RailsMigrations2sql
       @output_path = nil
       @migrations_paths = nil
       @seeds_path = nil
+      @seed_sources = []
+      @seed_sources_root = nil
       @schema_path = nil
       @use_schema_snapshot = false
       @strict = true

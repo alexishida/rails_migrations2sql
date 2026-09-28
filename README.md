@@ -82,7 +82,7 @@ The initial version and all following migrations are selected in ascending order
 db/sql/postgresql/20260923130000_add_status_to_orders.sql
 ```
 
-Each migration file contains its application SQL followed by a `schema_migrations` version insert. When seeds exist, the command also generates or updates `db/sql/<dialect>/seed.sql`. `db/seeds_sql.rb` takes precedence over `db/seeds.rb`.
+Each migration file contains its application SQL followed by a `schema_migrations` version insert. When seeds exist, the command also generates or updates `db/sql/<dialect>/seed.sql`. `config.seed_sources`, when configured, takes precedence over seed scripts. Otherwise `db/seeds_sql.rb` takes precedence over `db/seeds.rb`.
 
 The generator does not call `db:migrate` or execute generated SQL. All selected migrations, dialects, and seeds are compiled before files are written. Compilation errors preserve existing files, and each output file is replaced atomically.
 
@@ -120,6 +120,8 @@ end
 | `output_path` | `db/sql` | Directory for generated files. |
 | `migrations_paths` | Active Record paths or `db/migrate` | Migration directories. |
 | `seeds_path` | `db/seeds.rb` | Rails seed file compiled when present. |
+| `seed_sources` | `[]` | Declarative sources compiled by the gem instead of evaluating seed scripts. |
+| `seed_sources_root` | Rails root or current directory | Base directory for relative JSON source paths. |
 | `sql_seeds_path` | `seeds_sql.rb` next to `seeds_path` | Explicit SQL seed export; takes precedence. |
 | `strict` | `true` | Rejects unsupported operations. |
 | `use_schema_snapshot` | `false` | Loads a virtual schema from `schema.rb`. |
@@ -203,6 +205,37 @@ update :users, { name: "Administrator", updated_at: now }, where: lookup
 ```
 
 `sql(...)` represents a database expression. `execute(...)` appends SQL without opening a connection. Use only trusted seed files, and review generated SQL before execution.
+
+## Declarative seed sources
+
+For database-dependent Rails seeds, configure data sources in the initializer. The gem handles SQL generation without evaluating `db/seeds.rb`; application tables, input files, and domain mappings stay in the application's configuration.
+
+```ruby
+config.seed_sources = [
+  {
+    model: "Article", path: "db/data/articles.json",
+    columns: %i[title slug published_at featured],
+    defaults: { status: 1 },
+    types: { published_at: :datetime, featured: :oracle_boolean_string },
+    references: { category_id: { model: "Category", column: :slug, source: :category } },
+    rich_texts: { body: { source: :body, lookup: :slug } }
+  }
+]
+```
+
+`model` accepts a class or a class name and resolves attribute aliases without inspecting the database. `path` reads a JSON file afresh for every generation; `key` selects a top-level key. Alternatively, `records` accepts a Hash, an Array of records, or a callable returning those values. Callables execute under the offline connection guard.
+
+`columns` can be an Array of attributes (also mapping positional JSON rows) or a Hash mapping attributes to source fields. A mapping such as `category: { source: :category, map: -> { Category::LEGACY_CODES } }` applies an explicit value map. Missing keys, unknown mapped values, invalid row shapes, and unsupported types abort generation before any output file is changed. `defaults` accepts a Hash or callable; `position` adds the zero-based input position.
+
+The sources produce INSERTs in order, with `CURRENT_TIMESTAMP` for missing `created_at` and `updated_at`. Set `timestamps: false` for tables without those columns. They do not reproduce validations, callbacks, deletes, or application service behavior. The application must declare the values it intends to export.
+
+For Oracle, an absent numeric `id` uses the declared `sequence` or `<table>_seq`. Set `sequence: false` for identity columns, and declare `primary_key: :email` or another key for records without a numeric `id`. Existing IDs and timestamps are preserved. Other dialects rely on their normal identity/default behavior.
+
+`types` supports `:datetime` (explicit SQL conversion with Rails timezone rules), `:text` (escaped UTF-8 CLOB chunks for long Oracle text), `:numeric_boolean` (`"1"`/`"0"` string columns), and `:oracle_boolean_string` (`"Y"`/`"N"` for Oracle string-emulated boolean columns, native booleans elsewhere). Untyped values use the dialect's normal literal compiler. Boolean types accept only true, false, or nil.
+
+`references` resolve declared source values through scalar subqueries when the DBA applies the output. Each lookup accepts `model`, `column`, `source`, and optional `primary_key` (default `id`). `rich_texts` creates the associated `action_text_rich_texts` INSERTs with the model's polymorphic name; specify the body `source` and a unique record `lookup` column. Categories and other referenced rows must already exist when the SQL is applied.
+
+Configured sources work with `dba:sql`, `dba:sql:seeds`, and migration selections. `SEEDS=0` skips them without evaluating their files or callables. No connection is opened and no generated SQL is executed.
 
 ## Supported operations
 

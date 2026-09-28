@@ -29,7 +29,7 @@ module RailsMigrations2sql
     def generate_packages(version:, versions:, from:, to:, all:, latest:, target:, seeds:)
       migrations = @discovery.select(version: version, versions: versions, from: from, to: to, all: all, latest: latest)
       targets = resolve_targets(target)
-      unless [true, false, :auto].include?(seeds)
+      unless [ true, false, :auto ].include?(seeds)
         raise ConfigurationError, "seeds must be true, false or :auto"
       end
       seed_files = seeds == false ? [] : prepare_seeds(targets, required: seeds == true)
@@ -68,6 +68,13 @@ module RailsMigrations2sql
     end
 
     def prepare_seeds(targets, required:)
+      if @configuration.seed_sources.any?
+        return targets.map do |target_name|
+          compiler = CompilerFactory.build(target_name, @configuration)
+          SeedDataset.new(compiler: compiler, configuration: @configuration).prepare
+        end
+      end
+
       path = @configuration.seeds_path || File.join(project_root, "db", "seeds.rb")
       sql_path = @configuration.sql_seeds_path || File.join(File.dirname(path), "seeds_sql.rb")
       if @configuration.sql_seeds_path && !File.file?(sql_path)
@@ -94,7 +101,7 @@ module RailsMigrations2sql
       values = Array(requested).flat_map { |value| value.to_s.split(",") }.map { |value| value.strip.downcase }.reject(&:empty?).uniq
       raise ConfigurationError, "At least one target must be selected" if values.empty?
       targets = values.map(&:to_sym)
-      invalid = targets - Configuration::SUPPORTED_TARGETS - [:all]
+      invalid = targets - Configuration::SUPPORTED_TARGETS - [ :all ]
       raise ConfigurationError, "Unsupported target(s): #{invalid.join(', ')}" if invalid.any?
       targets.include?(:all) ? Configuration::SUPPORTED_TARGETS : targets
     end
