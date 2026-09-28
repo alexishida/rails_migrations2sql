@@ -25,17 +25,19 @@ module RailsMigrations2sql
     end
 
     def column(name, type, **options)
+      index_options = options.delete(:index)
       entry = { name: name.to_s, type: type.to_sym, options: options }
       if @change_table
         @operations << Operation.new(name: :add_column, args: [@table_name, name.to_s, type.to_sym], options: options)
       else
         @columns << entry
       end
+      index(name, **(index_options.is_a?(Hash) ? index_options : {})) if index_options
       self
     end
 
     def primary_key(name, type = :primary_key, **options)
-      column(name, type, **options.merge(primary_key: true))
+      column(name, type, **{ null: false, auto_increment: %i[primary_key integer bigint].include?(type.to_sym) }.merge(options).merge(primary_key: true))
     end
 
     def timestamps(**options)
@@ -83,7 +85,7 @@ module RailsMigrations2sql
       if @change_table
         @operations << Operation.new(name: :add_index, args: [@table_name, columns], options: options)
       else
-        @indexes << { columns: Array(columns).map(&:to_s), options: options }
+        @indexes << { columns: columns.is_a?(String) ? columns : Array(columns).map(&:to_s), options: options }
       end
       self
     end

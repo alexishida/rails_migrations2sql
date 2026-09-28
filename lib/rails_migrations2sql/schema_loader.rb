@@ -2,18 +2,19 @@
 
 module RailsMigrations2sql
   class SchemaLoader
-    def initialize(path)
-      @path = path
+    def initialize(path, primary_key_type: :bigint)
+      @path = path&.to_s
+      @primary_key_type = primary_key_type
     end
 
     def load
-      schema = VirtualSchema.new
-      return schema unless @path && File.file?(@path)
+      schema = VirtualSchema.new(primary_key_type: @primary_key_type)
+      raise OfflineCompilationError, "Schema snapshot not found: #{@path}" unless @path && File.file?(@path)
 
       body = extract_body(File.read(@path))
       SchemaSandbox.new(schema).instance_eval(body, @path, 1)
       schema
-    rescue StandardError => e
+    rescue StandardError, SyntaxError, LoadError => e
       raise OfflineCompilationError, "Could not load schema snapshot #{@path}: #{e.class}: #{e.message}"
     end
 
@@ -36,10 +37,10 @@ module RailsMigrations2sql
         @schema = schema
       end
 
-      def create_table(name, **_options)
+      def create_table(name, **options)
         definition = TableDefinition.new(name)
         yield definition if block_given?
-        @schema.create_table(name, **definition.to_h)
+        @schema.create_table(name, **definition.to_h, options: options)
       end
 
       def add_index(table, columns, **options)

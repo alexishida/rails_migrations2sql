@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "date"
-require "fileutils"
+require_relative "output_file"
 
 module RailsMigrations2sql
   class SeedRecorder
@@ -10,14 +10,15 @@ module RailsMigrations2sql
     class SeedRow
       attr_reader :attributes
 
-      def initialize(attributes)
-        @attributes = attributes.transform_keys(&:to_s)
+      def initialize(attributes, aliases: {})
+        @aliases = aliases
+        @attributes = attributes.transform_keys { |name| attribute_name(name) }
       end
 
       def method_missing(name, *args)
-        key = name.to_s
-        if key.end_with?("=") && args.length == 1
-          @attributes[key.delete_suffix("=")] = args.first
+        key = attribute_name(name.to_s.delete_suffix("="))
+        if name.to_s.end_with?("=") && args.length == 1
+          @attributes[key] = args.first
         elsif args.empty? && @attributes.key?(key)
           @attributes.fetch(key)
         else
@@ -27,7 +28,13 @@ module RailsMigrations2sql
       end
 
       def respond_to_missing?(name, include_private = false)
-        name.to_s.end_with?("=") || @attributes.key?(name.to_s) || super
+        name.to_s.end_with?("=") || @attributes.key?(attribute_name(name)) || super
+      end
+
+      private
+
+      def attribute_name(name)
+        @aliases.fetch(name.to_s, name.to_s)
       end
     end
 
@@ -81,19 +88,29 @@ module RailsMigrations2sql
       recorder = new
       previous = Thread.current[CONTEXT_KEY]
       Thread.current[CONTEXT_KEY] = recorder
+      path = File.expand_path(path)
       load path
       recorder.rows
+    rescue StandardError, SyntaxError, LoadError => e
+      location = e.backtrace&.find { |line| line.start_with?("#{path}:") }
+      error_class = e.is_a?(UnsupportedOperationError) ? UnsupportedOperationError : OfflineCompilationError
+      raise error_class,
+            "Offline seed compilation failed at #{location || path}: #{e.class}: #{e.message}. " \
+            "Generate migrations separately with dba:sql (without SEEDS=1)"
     ensure
       Thread.current[CONTEXT_KEY] = previous
     end
 
     def self.write(rows, compiler:, configuration:)
+      prepare(rows, compiler: compiler, configuration: configuration).write
+    end
+
+    def self.prepare(rows, compiler:, configuration:)
       root = configuration.output_path || File.join(
         defined?(Rails) && Rails.respond_to?(:root) && Rails.root ? Rails.root.to_s : Dir.pwd,
         "db", "sql"
       )
       directory = File.join(root.to_s, compiler.target.to_s)
-      FileUtils.mkdir_p(directory)
       path = File.join(directory, "seeds.sql")
       formatter = SqlFormatter.new(compiler.target)
       statements = rows.map do |entry|
@@ -118,8 +135,7 @@ module RailsMigrations2sql
         "-- Target: #{compiler.target}",
         "-- Review with your DBA before production execution."
       ].join("\n")
-      File.write(path, [header, formatter.join(statements)].reject(&:empty?).join("\n\n") + "\n")
-      path
+      OutputFile.new(path: path, content: [header, formatter.join(statements)].reject(&:empty?).join("\n\n") + "\n")
     end
 
     attr_reader :rows
@@ -144,7 +160,8 @@ module RailsMigrations2sql
 
       conditions = positional.first || keywords
       validate_attributes!(conditions)
-      add_row(model, conditions, block: block, lookup: conditions.transform_keys(&:to_s))
+      lookup = SeedRow.new(conditions, aliases: model.attribute_aliases).attributes.deep_dup
+      add_row(model, conditions, block: block, lookup: lookup)
     end
 
     def record_bulk(model, entries, options)
@@ -157,16 +174,16 @@ module RailsMigrations2sql
     private
 
     def add_row(model, attributes, block: nil, lookup: nil)
-      validate_attributes!(attributes)
-      row = SeedRow.new(attributes)
+      validate_attributes!(attributes, allow_empty: !block.nil?)
+      row = SeedRow.new(attributes, aliases: model.attribute_aliases)
       block.call(row) if block
       validate_attributes!(row.attributes)
-      @rows << { table: model.table_name, attributes: row.attributes.dup, lookup: lookup }
+      @rows << { table: model.table_name, attributes: row.attributes.deep_dup, lookup: lookup&.deep_dup }
       row
     end
 
-    def validate_attributes!(attributes)
-      unless attributes.is_a?(Hash) && !attributes.empty?
+    def validate_attributes!(attributes, allow_empty: false)
+      unless attributes.is_a?(Hash) && (allow_empty || !attributes.empty?)
         raise UnsupportedOperationError, "Seed inserts require a nonempty Hash of attributes"
       end
 

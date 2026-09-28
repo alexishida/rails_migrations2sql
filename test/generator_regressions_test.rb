@@ -83,6 +83,85 @@ class GeneratorRegressionsTest < Minitest::Test
     end
   end
 
+  def test_all_does_not_hide_invalid_targets
+    with_project do |config|
+      error = assert_raises(RailsMigrations2sql::ConfigurationError) do
+        RailsMigrations2sql::Generator.new(config).generate(all: true, target: "all,typo")
+      end
+      assert_includes error.message, "typo"
+      assert_equal 0, self.class.loads
+    end
+  end
+
+  def test_invalid_version_bounds_do_not_select_unintended_migrations
+    with_project do |config|
+      generator = RailsMigrations2sql::Generator.new(config)
+      [{ from: "typo" }, { to: "20260101000000oops" }, { from: "" },
+       { from: "20260101000001", to: "20260101000000" }].each do |bounds|
+        assert_raises(RailsMigrations2sql::ConfigurationError) do
+          generator.generate(**bounds, target: :postgresql)
+        end
+      end
+      assert_equal 0, self.class.loads
+      assert_empty Dir[File.join(config.output_path, "**", "*.sql")]
+    end
+  end
+
+  def test_failure_in_later_migration_preserves_existing_files
+    with_project do |config|
+      generator = RailsMigrations2sql::Generator.new(config)
+      result = generator.generate(all: true, target: :postgresql)
+      before = result.packages.to_h { |path| [path, File.binread(path)] }
+      first, last = Dir[File.join(config.migrations_paths.first, "*.rb")].sort
+      File.write(first, File.read(first).sub("t.datetime :created_at", "t.datetime :modified_at"))
+      File.write(last, File.read(last).sub('add_column :events, :name, :string', 'raise "Later migration failed"'))
+
+      assert_raises(RailsMigrations2sql::OfflineCompilationError) { generator.generate(all: true, target: :postgresql) }
+      assert_equal before, result.packages.to_h { |path| [path, File.binread(path)] }
+    end
+  end
+
+  def test_failure_in_later_dialect_does_not_leave_partial_output
+    with_project do |config|
+      first = Dir[File.join(config.migrations_paths.first, "*.rb")].sort.first
+      File.write(first, File.read(first).sub('create_table(:events)', 'enable_extension :pgcrypto; create_table(:events)'))
+      assert_raises(RailsMigrations2sql::UnsupportedOperationError) do
+        RailsMigrations2sql::Generator.new(config).generate(all: true, target: "postgresql,mysql")
+      end
+      assert_empty Dir[File.join(config.output_path, "**", "*.sql")]
+    end
+  end
+
+  def test_reloading_migration_does_not_keep_a_removed_change_method
+    with_project do |config|
+      generator = RailsMigrations2sql::Generator.new(config)
+      generator.generate(version: "20260101000000", target: :postgresql)
+      path = Dir[File.join(config.migrations_paths.first, "*.rb")].sort.first
+      File.write(path, <<~RUBY)
+        class GeneratorProbe < ActiveRecord::Migration[8.0]
+          def up
+            execute "SELECT 'new up method'"
+          end
+        end
+      RUBY
+      result = generator.generate(version: "20260101000000", target: :postgresql)
+      sql = File.read(result.packages.first)
+      assert_includes sql, "new up method"
+      refute_includes sql, "CREATE TABLE"
+    end
+  end
+
+  def test_duplicate_versions_are_rejected_before_evaluation
+    with_project do |config|
+      path = File.join(config.migrations_paths.first, "20260101000000_duplicate.rb")
+      File.write(path, "raise 'Should not load'\n")
+      assert_raises(RailsMigrations2sql::ConfigurationError) do
+        RailsMigrations2sql::Generator.new(config).generate(all: true, target: :postgresql)
+      end
+      assert_equal 0, self.class.loads
+    end
+  end
+
   def test_migration_sources_and_snapshot_are_reloaded_on_next_generation
     with_project do |config|
       generator = RailsMigrations2sql::Generator.new(config)

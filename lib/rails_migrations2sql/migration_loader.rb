@@ -3,48 +3,28 @@
 module RailsMigrations2sql
   class MigrationLoader
     def load_class(migration_file)
-      load migration_file.path
-      klass = constantize(migration_file.class_name)
+      namespace = Module.new
+      load migration_file.path, namespace
+      klass = namespace.const_get(migration_file.class_name, false) if namespace.const_defined?(migration_file.class_name, false)
       return klass if migration_class?(klass)
 
-      candidate = migration_candidates(migration_file.path).last
-      return candidate if candidate
+      candidates = namespace.constants(false).filter_map do |name|
+        candidate = namespace.const_get(name, false)
+        candidate if migration_class?(candidate)
+      end
+      return candidates.first if candidates.length == 1
 
       raise OfflineCompilationError,
-            "Could not find an ActiveRecord::Migration class in #{migration_file.path}. Expected #{migration_file.class_name}."
-    rescue SyntaxError, LoadError => e
-      raise OfflineCompilationError, "Could not load #{migration_file.path}: #{e.message}"
+            "Could not find an unambiguous ActiveRecord::Migration class in #{migration_file.path}. Expected #{migration_file.class_name}."
+    rescue StandardError, SyntaxError, LoadError => e
+      error_class = e.is_a?(UnsupportedOperationError) ? UnsupportedOperationError : OfflineCompilationError
+      raise error_class, "Could not load #{migration_file.path}: #{e.class}: #{e.message}"
     end
 
     private
 
-    def constantize(name)
-      if defined?(ActiveSupport::Inflector)
-        ActiveSupport::Inflector.safe_constantize(name)
-      else
-        Object.const_get(name)
-      end
-    rescue NameError
-      nil
-    end
-
     def migration_class?(klass)
-      klass.is_a?(Class) && defined?(ActiveRecord::Migration) && klass < ActiveRecord::Migration
-    end
-
-    def migration_candidates(path)
-      expanded = File.expand_path(path)
-      ObjectSpace.each_object(Class).select do |klass|
-        next false unless migration_class?(klass)
-
-        %i[change up down].any? do |method_name|
-          next false unless klass.instance_methods(false).include?(method_name)
-          location = klass.instance_method(method_name).source_location&.first
-          location && File.expand_path(location) == expanded
-        end
-      rescue StandardError
-        false
-      end
+      klass.is_a?(Class) && klass < ActiveRecord::Migration
     end
   end
 end

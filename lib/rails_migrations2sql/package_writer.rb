@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "fileutils"
+require_relative "output_file"
 
 module RailsMigrations2sql
   class PackageWriter
@@ -15,13 +15,15 @@ module RailsMigrations2sql
     end
 
     def write
+      prepare.write
+    end
+
+    def prepare
       directory = File.join(output_root, @compiler.target.to_s)
-      FileUtils.mkdir_p(directory)
       @path = File.join(directory, "#{@migration_file.stem}.sql")
 
       body = @formatter.join(@up_sql)
-      File.write(@path, [header("UP"), body, register_sql].reject(&:empty?).join("\n\n") + "\n")
-      @path
+      OutputFile.new(path: @path, content: [header("UP"), body, register_sql].reject(&:empty?).join("\n\n") + "\n")
     end
 
     private

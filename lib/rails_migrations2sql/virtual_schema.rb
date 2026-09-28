@@ -9,12 +9,15 @@ module RailsMigrations2sql
     ForeignKey = Struct.new(:name, :to_table, :column, :primary_key, :options, keyword_init: true)
     Table = Struct.new(:name, :columns, :indexes, :foreign_keys, :known, keyword_init: true)
 
-    def initialize
+    def initialize(primary_key_type: :bigint)
+      @primary_key_type = primary_key_type
       @tables = {}
+      @dropped_tables = {}
     end
 
     def initialize_copy(other)
       super
+      @dropped_tables = other.instance_variable_get(:@dropped_tables).dup
       @tables = other.instance_variable_get(:@tables).transform_values do |table|
         Table.new(
           name: table.name.dup,
@@ -26,17 +29,19 @@ module RailsMigrations2sql
       end
     end
 
-    def create_table(name, columns: [], indexes: [], foreign_keys: [])
+    def create_table(name, columns: [], indexes: [], foreign_keys: [], options: {})
       table = Table.new(name: name.to_s, columns: {}, indexes: {}, foreign_keys: {}, known: true)
+      @dropped_tables.delete(name.to_s)
+      columns = Util.table_columns(columns, options, primary_key_type: @primary_key_type)
       columns.each { |column| table.columns[column[:name].to_s] = Column.new(name: column[:name].to_s, type: column[:type]&.to_sym, options: column[:options] || {}) }
       indexes.each do |index|
         iname = index[:options]&.dig(:name) || Util.default_index_name(name, index[:columns])
         table.indexes[iname.to_s] = Index.new(name: iname.to_s, columns: Array(index[:columns]).map(&:to_s), options: index[:options] || {})
       end
       foreign_keys.each do |fk|
-        column = fk[:options]&.dig(:column) || "#{fk[:to_table].to_s.sub(/s\z/, '')}_id"
+        column = fk[:options]&.dig(:column) || "#{Util.singularize(fk[:to_table])}_id"
         fname = fk[:options]&.dig(:name) || Util.default_foreign_key_name(name, column)
-        table.foreign_keys[fname.to_s] = ForeignKey.new(name: fname.to_s, to_table: fk[:to_table].to_s, column: column.to_s, primary_key: (fk[:options]&.dig(:primary_key) || "id").to_s, options: fk[:options] || {})
+        table.foreign_keys[fname.to_s] = ForeignKey.new(name: fname.to_s, to_table: fk[:to_table].to_s, column: Array(column).map(&:to_s), primary_key: Array(fk[:options]&.dig(:primary_key) || "id").map(&:to_s), options: fk[:options] || {})
       end
       @tables[name.to_s] = table
     end
@@ -47,12 +52,14 @@ module RailsMigrations2sql
 
     def drop_table(name)
       @tables.delete(name.to_s)
+      @dropped_tables[name.to_s] = true
     end
 
     def rename_table(old_name, new_name)
-      table = require_known_table!(old_name)
-      @tables.delete(old_name.to_s)
+      table = ensure_table(old_name)
+      drop_table(old_name)
       table.name = new_name.to_s
+      @dropped_tables.delete(new_name.to_s)
       @tables[new_name.to_s] = table
     end
 
@@ -62,22 +69,26 @@ module RailsMigrations2sql
     end
 
     def remove_column(table_name, column_name)
-      table = require_known_table!(table_name)
+      table = ensure_table(table_name)
       table.columns.delete(column_name.to_s)
+      table.indexes.delete_if { |_name, index| index.columns.include?(column_name.to_s) }
+      table.foreign_keys.delete_if { |_name, fk| fk.column.include?(column_name.to_s) }
     end
 
     def rename_column(table_name, old_name, new_name)
-      table = require_known_table!(table_name)
+      table = ensure_table(table_name)
       column = table.columns[old_name.to_s]
       raise UnknownSchemaStateError, "Unknown column #{table_name}.#{old_name}" unless column
       table.columns.delete(old_name.to_s)
 
       column.name = new_name.to_s
       table.columns[new_name.to_s] = column
+      table.indexes.each_value { |index| index.columns.map! { |name| name == old_name.to_s ? new_name.to_s : name } }
+      table.foreign_keys.each_value { |fk| fk.column.map! { |name| name == old_name.to_s ? new_name.to_s : name } }
     end
 
     def change_column(table_name, column_name, type = nil, options = {})
-      table = require_known_table!(table_name)
+      table = ensure_table(table_name)
       column = table.columns[column_name.to_s]
       raise UnknownSchemaStateError, "Unknown column #{table_name}.#{column_name}" unless column
 
@@ -91,8 +102,20 @@ module RailsMigrations2sql
       table.indexes[name.to_s] = Index.new(name: name.to_s, columns: Array(columns).map(&:to_s), options: options)
     end
 
+    def index(table_name, columns = nil, **options)
+      table = @tables[table_name.to_s]
+      return nil unless table
+
+      matches = table.indexes.values.select do |entry|
+        (!columns || entry.columns == Array(columns).map(&:to_s)) &&
+          (!options[:name] || entry.name == options[:name].to_s)
+      end
+      raise UnsupportedOperationError, "Multiple indexes match #{table_name}; specify name:" if matches.length > 1
+      matches.first
+    end
+
     def remove_index(table_name, columns = nil, options = {})
-      table = require_known_table!(table_name)
+      table = ensure_table(table_name)
       columns ||= options[:column]
       if options[:name]
         table.indexes.delete(options[:name].to_s)
@@ -104,7 +127,7 @@ module RailsMigrations2sql
     end
 
     def rename_index(table_name, old_name, new_name)
-      table = require_known_table!(table_name)
+      table = ensure_table(table_name)
       index = table.indexes.delete(old_name.to_s)
       return unless index
 
@@ -114,32 +137,34 @@ module RailsMigrations2sql
 
     def add_foreign_key(from_table, to_table, options = {})
       table = ensure_table(from_table)
-      column = options[:column] || "#{to_table.to_s.sub(/s\z/, '')}_id"
+      column = options[:column] || "#{Util.singularize(to_table)}_id"
       name = options[:name] || Util.default_foreign_key_name(from_table, column)
       table.foreign_keys[name.to_s] = ForeignKey.new(
         name: name.to_s,
         to_table: to_table.to_s,
-        column: column.to_s,
-        primary_key: (options[:primary_key] || "id").to_s,
+        column: Array(column).map(&:to_s),
+        primary_key: Array(options[:primary_key] || "id").map(&:to_s),
         options: options
       )
     end
 
     def remove_foreign_key(from_table, to_table = nil, options = {})
-      table = require_known_table!(from_table)
+      table = ensure_table(from_table)
       name = options[:name]
       if name
         table.foreign_keys.delete(name.to_s)
       else
         column = options[:column]
         pair = table.foreign_keys.find do |_key, fk|
-          (!to_table || fk.to_table == to_table.to_s) && (!column || fk.column == column.to_s)
+          (!to_table || fk.to_table == to_table.to_s) && (!column || fk.column == Array(column).map(&:to_s))
         end
         table.foreign_keys.delete(pair.first) if pair
       end
     end
 
     def table_exists?(name)
+      return false if @dropped_tables[name.to_s]
+
       table = @tables[name.to_s]
       raise UnknownSchemaStateError, "Schema state for table #{name} is unknown" unless table
 
@@ -147,9 +172,15 @@ module RailsMigrations2sql
     end
 
     def column_exists?(table_name, column_name, type = nil, **options)
-      table = require_known_table!(table_name)
+      return false if @dropped_tables[table_name.to_s]
+
+      table = @tables[table_name.to_s]
+      raise UnknownSchemaStateError, "Schema state for table #{table_name} is unknown" unless table
       column = table.columns[column_name.to_s]
-      return false unless column
+      unless column
+        raise UnknownSchemaStateError, "Schema state for column #{table_name}.#{column_name} is unknown" unless table.known
+        return false
+      end
       return false if type && column.type != type.to_sym
       options.all? { |key, value| column.options[key] == value }
     end
@@ -168,14 +199,14 @@ module RailsMigrations2sql
       table = require_known_table!(from_table)
       table.foreign_keys.values.any? do |fk|
         (!to_table || fk.to_table == to_table.to_s) &&
-          (!options[:column] || fk.column == options[:column].to_s) &&
+          (!options[:column] || fk.column == Array(options[:column]).map(&:to_s)) &&
           (!options[:name] || fk.name == options[:name].to_s)
       end
     end
 
     def column(table_name, column_name)
       table = @tables[table_name.to_s]
-      return nil unless table&.known
+      return nil unless table
 
       table.columns[column_name.to_s]
     end
@@ -184,7 +215,12 @@ module RailsMigrations2sql
       case operation.name
       when :create_table
         data = operation.data || {}
-        create_table(operation.args[0], columns: data[:columns] || [], indexes: data[:indexes] || [], foreign_keys: data[:foreign_keys] || [])
+        create_table(operation.args[0], columns: data[:columns] || [], indexes: data[:indexes] || [], foreign_keys: data[:foreign_keys] || [], options: operation.options)
+      when :create_join_table
+        name = operation.options[:table_name] || Util.join_table_name(*operation.args)
+        create_table(name, **operation.data, options: { id: false })
+      when :drop_join_table
+        drop_table(operation.options[:table_name] || Util.join_table_name(*operation.args))
       when :drop_table
         drop_table(operation.args[0])
       when :rename_table
@@ -220,8 +256,8 @@ module RailsMigrations2sql
       when :remove_reference
         apply_remove_reference(operation)
       when :add_timestamps
-        add_column(operation.args[0], :created_at, :datetime, operation.options)
-        add_column(operation.args[0], :updated_at, :datetime, operation.options)
+        add_column(operation.args[0], :created_at, :datetime, { null: false }.merge(operation.options))
+        add_column(operation.args[0], :updated_at, :datetime, { null: false }.merge(operation.options))
       when :remove_timestamps
         remove_column(operation.args[0], :created_at)
         remove_column(operation.args[0], :updated_at)
@@ -262,8 +298,10 @@ module RailsMigrations2sql
       add_column(table, "#{ref}_id", type, options.reject { |k, _| %i[index foreign_key polymorphic type].include?(k) })
       add_index(table, options[:polymorphic] ? ["#{ref}_type", "#{ref}_id"] : "#{ref}_id", normalize_index_options(options[:index])) unless options[:index] == false
       if options[:foreign_key]
-        to_table = options[:foreign_key].is_a?(Hash) && options[:foreign_key][:to_table] || Util.pluralize(ref)
-        add_foreign_key(table, to_table, column: "#{ref}_id")
+        fk_options = options[:foreign_key].is_a?(Hash) ? options[:foreign_key].dup : {}
+        to_table = fk_options.delete(:to_table) || Util.pluralize(ref)
+        fk_options[:column] ||= "#{ref}_id"
+        add_foreign_key(table, to_table, fk_options)
       end
     end
 

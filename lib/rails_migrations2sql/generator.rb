@@ -10,27 +10,27 @@ module RailsMigrations2sql
       @loader = MigrationLoader.new
     end
 
-    def generate(version: nil, versions: nil, from: nil, to: nil, all: false, latest: false, target: nil)
+    def generate(version: nil, versions: nil, from: nil, to: nil, all: false, latest: false, target: nil, seeds: false)
       OfflineGuard.protect do
-        generate_packages(version: version, versions: versions, from: from, to: to, all: all, latest: latest, target: target)
+        generate_packages(version: version, versions: versions, from: from, to: to, all: all, latest: latest, target: target, seeds: seeds)
       end
     end
 
     def generate_seeds(target: nil)
       OfflineGuard.protect do
         targets = resolve_targets(target)
-        rows = load_seed_rows(required: true)
-        Result.new(packages: write_seeds(rows, targets), migrations: [], targets: targets)
+        rows = load_seed_rows
+        Result.new(packages: prepare_seeds(rows, targets).map(&:write), migrations: [], targets: targets)
       end
     end
 
     private
 
-    def generate_packages(version:, versions:, from:, to:, all:, latest:, target:)
+    def generate_packages(version:, versions:, from:, to:, all:, latest:, target:, seeds:)
       migrations = @discovery.select(version: version, versions: versions, from: from, to: to, all: all, latest: latest)
       targets = resolve_targets(target)
-      seed_rows = load_seed_rows(required: false)
-      packages = []
+      seed_rows = load_seed_rows if seeds
+      files = []
       initial_schema = base_schema
       migration_classes = {}
 
@@ -55,29 +55,28 @@ module RailsMigrations2sql
             configuration: @configuration,
             up_sql: up_sql
           )
-          packages << writer.write
+          files << writer.prepare
           schema = evaluation.schema_after
         end
       end
 
-      packages.concat(write_seeds(seed_rows, targets)) if seed_rows
-      Result.new(packages: packages, migrations: migrations, targets: targets)
+      files.concat(prepare_seeds(seed_rows, targets)) if seed_rows
+      Result.new(packages: files.map(&:write), migrations: migrations, targets: targets)
     end
 
-    def load_seed_rows(required:)
+    def load_seed_rows
       path = @configuration.seeds_path || File.join(project_root, "db", "seeds.rb")
       unless File.file?(path)
-        raise ConfigurationError, "Seed file not found: #{path}" if required
-        return nil
+        raise ConfigurationError, "Seed file not found: #{path}"
       end
 
       SeedRecorder.capture(path)
     end
 
-    def write_seeds(rows, targets)
+    def prepare_seeds(rows, targets)
       targets.map do |target_name|
         compiler = CompilerFactory.build(target_name, @configuration)
-        SeedRecorder.write(rows, compiler: compiler, configuration: @configuration)
+        SeedRecorder.prepare(rows, compiler: compiler, configuration: @configuration)
       end
     end
 
@@ -85,19 +84,17 @@ module RailsMigrations2sql
       requested = target || @configuration.target
       values = Array(requested).flat_map { |value| value.to_s.split(",") }.map { |value| value.strip.downcase }.reject(&:empty?).uniq
       raise ConfigurationError, "At least one target must be selected" if values.empty?
-      return Configuration::SUPPORTED_TARGETS if values.include?("all")
-
       targets = values.map(&:to_sym)
-      invalid = targets - Configuration::SUPPORTED_TARGETS
+      invalid = targets - Configuration::SUPPORTED_TARGETS - [:all]
       raise ConfigurationError, "Unsupported target(s): #{invalid.join(', ')}" if invalid.any?
-      targets
+      targets.include?(:all) ? Configuration::SUPPORTED_TARGETS : targets
     end
 
     def base_schema
-      return VirtualSchema.new unless @configuration.use_schema_snapshot
+      return VirtualSchema.new(primary_key_type: @configuration.primary_key_type) unless @configuration.use_schema_snapshot
 
       path = @configuration.schema_path || default_schema_path
-      SchemaLoader.new(path).load
+      SchemaLoader.new(path, primary_key_type: @configuration.primary_key_type).load
     end
 
     def default_schema_path

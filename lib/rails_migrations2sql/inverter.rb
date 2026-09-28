@@ -33,7 +33,7 @@ module RailsMigrations2sql
         operations = args.drop(1).map do |column|
           type = common_type || types[column.to_sym] || types[column.to_s]
           raise IrreversibleOperationError, "Missing type for removed column #{column}" unless type
-          Operation.new(name: :add_column, args: [args[0], column, type], source: operation.source)
+          Operation.new(name: :add_column, args: [args[0], column, type], options: opts.reject { |key, _| %i[type types].include?(key) }, source: operation.source)
         end
         OperationGroup.new(operations: operations, label: "invert_remove_columns")
       when :rename_column

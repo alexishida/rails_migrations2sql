@@ -11,6 +11,14 @@ module RailsMigrations2sql
         "`#{name.to_s.gsub('`', '``')}`"
       end
 
+      def literal(value)
+        # Hexadecimal text avoids dependence on the server's backslash SQL mode.
+        if value.is_a?(String) && value.include?("\\")
+          return "_utf8mb4 X'#{value.encode(Encoding::UTF_8).unpack1('H*')}'"
+        end
+        super
+      end
+
       def boolean_literal(value)
         value ? "1" : "0"
       end
@@ -71,9 +79,12 @@ module RailsMigrations2sql
       end
 
       def compile_remove_index(op)
+        if op.options[:if_exists] && target == :mysql
+          return unsupported!(op.name, "MySQL does not support DROP INDEX IF EXISTS")
+        end
         table, columns = op.args.first(2)
         name = op.options[:name] || Util.default_index_name(table, columns)
-        "DROP INDEX #{quote_identifier(name)} ON #{quote_table(table)}"
+        "DROP INDEX#{op.options[:if_exists] ? ' IF EXISTS' : ''} #{quote_identifier(name)} ON #{quote_table(table)}"
       end
 
       def compile_rename_index(op)
@@ -81,6 +92,9 @@ module RailsMigrations2sql
       end
 
       def compile_add_index(op)
+        if op.options[:if_not_exists] && target == :mysql
+          return unsupported!(op.name, "MySQL does not support CREATE INDEX IF NOT EXISTS")
+        end
         if op.options[:where]
           return unsupported!(op.name, "MySQL/MariaDB does not support Rails-style partial indexes with where:")
         end
@@ -90,7 +104,7 @@ module RailsMigrations2sql
         name = opts[:name] || Util.default_index_name(table, columns)
         unique = opts[:unique] ? "UNIQUE " : ""
         using = opts[:using] ? " USING #{opts[:using].to_s.upcase}" : ""
-        sql = "CREATE #{unique}INDEX #{quote_identifier(name)}#{using} ON #{quote_table(table)} (#{index_columns(columns, opts)})"
+        sql = "CREATE #{unique}INDEX#{opts[:if_not_exists] ? ' IF NOT EXISTS' : ''} #{quote_identifier(name)}#{using} ON #{quote_table(table)} (#{index_columns(columns, opts)})"
         sql += " ALGORITHM=#{opts[:algorithm].to_s.upcase}" if opts[:algorithm] && opts[:algorithm].to_s != "default"
         sql
       end

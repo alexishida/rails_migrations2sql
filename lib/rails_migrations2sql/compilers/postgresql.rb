@@ -29,7 +29,13 @@ module RailsMigrations2sql
 
       def compile_change_column(op)
         table, column, type = op.args.first(3)
-        statements = ["ALTER TABLE #{quote_table(table)} ALTER COLUMN #{quote_column(column)} TYPE #{type_sql(type, op.options)}"]
+        statement = "ALTER TABLE #{quote_table(table)} ALTER COLUMN #{quote_column(column)} TYPE #{type_sql(type, op.options)}"
+        if op.options[:using]
+          statement += " USING #{op.options[:using]}"
+        elsif op.options[:cast_as]
+          statement += " USING CAST(#{quote_column(column)} AS #{type_sql(op.options[:cast_as])})"
+        end
+        statements = [statement]
         statements << compile_change_column_default(Operation.new(name: :change_column_default, args: [table, column, op.options[:default]])) if op.options.key?(:default)
         statements << compile_change_column_null(Operation.new(name: :change_column_null, args: [table, column, op.options[:null]])) if op.options.key?(:null)
         statements
@@ -39,7 +45,7 @@ module RailsMigrations2sql
         table, columns = op.args.first(2)
         name = op.options[:name] || Util.default_index_name(table, columns)
         concurrently = op.options[:algorithm].to_s == "concurrently" ? " CONCURRENTLY" : ""
-        "DROP INDEX#{concurrently} #{quote_identifier(name)}"
+        "DROP INDEX#{concurrently}#{op.options[:if_exists] ? ' IF EXISTS' : ''} #{quote_identifier(name)}"
       end
 
       def compile_enable_extension(op)

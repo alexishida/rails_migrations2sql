@@ -11,7 +11,8 @@ namespace :dba do
       to: ENV["TO"],
       all: ENV["ALL"] == "1",
       latest: versions.to_s.empty? && ENV["FROM"].to_s.empty? && ENV["TO"].to_s.empty? && ENV["ALL"] != "1",
-      target: target
+      target: target,
+      seeds: ENV["SEEDS"] == "1"
     )
 
     puts "Compiled #{result.migrations.length} migration(s) for #{result.targets.join(', ')}"
@@ -32,7 +33,7 @@ namespace :dba do
 
     desc "Compile every migration file offline"
     task all: :environment do
-      result = RailsMigrations2sql.generate(all: true, target: ENV["TARGET"])
+      result = RailsMigrations2sql.generate(all: true, target: ENV["TARGET"], seeds: ENV["SEEDS"] == "1")
       puts "Compiled #{result.migrations.length} migration(s) for #{result.targets.join(', ')}"
       result.packages.each { |path| puts "  #{path}" }
     rescue RailsMigrations2sql::Error => e
@@ -41,7 +42,7 @@ namespace :dba do
 
     desc "Compile only the latest migration file offline"
     task latest: :environment do
-      result = RailsMigrations2sql.generate(latest: true, target: ENV["TARGET"])
+      result = RailsMigrations2sql.generate(latest: true, target: ENV["TARGET"], seeds: ENV["SEEDS"] == "1")
       puts "Compiled #{result.migrations.length} migration(s) for #{result.targets.join(', ')}"
       result.packages.each { |path| puts "  #{path}" }
     rescue RailsMigrations2sql::Error => e

@@ -12,13 +12,17 @@ module RailsMigrations2sql
 
     def format(statement)
       sql = statement.to_s.rstrip
-      return sql if sql.empty? || sql.start_with?("--")
+      return sql if sql.empty? || sql.lines.all? { |line| line.strip.empty? || line.lstrip.start_with?("--") }
 
       if @target == :oracle && plsql?(sql)
         body = sql.end_with?(";") ? sql : "#{sql};"
         "#{body}\n/"
       else
-        sql.end_with?(";") ? sql : "#{sql};"
+        if sql.lines.last.include?("--")
+          "#{sql}\n;"
+        else
+          sql.end_with?(";") ? sql : "#{sql};"
+        end
       end
     end
 

@@ -11,6 +11,12 @@ module RailsMigrations2sql
         "[#{name.to_s.gsub(']', ']]')}]"
       end
 
+      def literal(value)
+        return "N#{super}" if value.is_a?(String)
+
+        super
+      end
+
       def boolean_literal(value)
         value ? "1" : "0"
       end
@@ -125,11 +131,11 @@ module RailsMigrations2sql
           IF @df IS NOT NULL
           BEGIN
             DECLARE @sql nvarchar(max);
-            SET @sql = N#{literal("ALTER TABLE #{quote_table(table)} DROP CONSTRAINT ")} + QUOTENAME(@df);
+            SET @sql = #{literal("ALTER TABLE #{quote_table(table)} DROP CONSTRAINT ")} + QUOTENAME(@df);
             EXEC sys.sp_executesql @sql;
           END;
         SQL
-        "EXEC sys.sp_executesql N#{literal(batch)};"
+        "EXEC sys.sp_executesql #{literal(batch)};"
       end
     end
   end

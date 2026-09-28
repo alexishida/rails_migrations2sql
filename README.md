@@ -90,9 +90,9 @@ Em um projeto configurado com PostgreSQL, a migration acima gera apenas este arq
 db/sql/postgresql/20260923130000_add_status_to_orders.sql
 ```
 
-O arquivo da migration contém o SQL de aplicação, seguido da inserção da versão em `schema_migrations`. Se existir `db/seeds.rb`, o comando também gera `db/sql/postgresql/seeds.sql` com os dados do seed.
+O arquivo da migration contém o SQL de aplicação, seguido da inserção da versão em `schema_migrations`. O comando não carrega `db/seeds.rb`. Para incluir os seeds, informe `SEEDS=1`; isso também gera `db/sql/postgresql/seeds.sql`.
 
-A geração não chama `db:migrate` nem executa os scripts produzidos. Gerar novamente a mesma migration sobrescreve seus arquivos. Pastas e scripts produzidos pelo formato antigo não são removidos automaticamente e não devem ser executados junto com os novos arquivos.
+A geração não chama `db:migrate` nem executa os scripts produzidos. Todas as migrations, dialetos e seeds solicitados são compilados antes da escrita: erros de compilação preservam os arquivos existentes. Cada arquivo é substituído atomicamente; uma falha de disco pode interromper o lote entre arquivos. Gerar novamente a mesma migration sobrescreve seus arquivos. Pastas e scripts produzidos pelo formato antigo não são removidos automaticamente e não devem ser executados junto com os novos arquivos.
 
 ## Bancos de destino
 
@@ -165,6 +165,9 @@ bin/rails dba:sql:all
 # Seleção explícita da mais recente
 bin/rails dba:sql:latest
 
+# Incluir seeds explicitamente no lote de migrations
+bin/rails dba:sql FROM=20260923130000 SEEDS=1
+
 # Gerar somente o seed, sem gerar migrations
 bin/rails dba:sql:seeds
 
@@ -189,11 +192,15 @@ bin/rails dba:sql VERSION=20260923130000 TARGET=all
 
 ### Dados do seed
 
-Quando `db/seeds.rb` existe, `dba:sql`, `dba:sql:all` e `dba:sql:latest` geram também `db/sql/<dialeto>/seeds.sql`. Para gerar apenas esse arquivo, execute `bin/rails dba:sql:seeds`; `TARGET=all` funciona nos dois fluxos. O comando isolado exige que o arquivo de seeds exista. O arquivo é sobrescrito em uma nova geração e deve ser executado **depois** das migrations que criam as tabelas e colunas usadas pelos dados.
+`dba:sql`, `dba:sql:all` e `dba:sql:latest` geram somente migrations por padrão, sem carregar `db/seeds.rb`. Para incluir `db/sql/<dialeto>/seeds.sql`, adicione `SEEDS=1`. Para gerar apenas esse arquivo, execute `bin/rails dba:sql:seeds`; `TARGET=all` funciona nos dois fluxos. Nos dois casos, a geração explícita de seeds exige que o arquivo exista. O arquivo é sobrescrito em uma nova geração e deve ser executado **depois** das migrations que criam as tabelas e colunas usadas pelos dados.
 
 A compilação offline aceita `Model.create`, `Model.create!`, `Model.insert_all`, `Model.insert_all!` e `Model.find_or_create_by`/`find_or_create_by!` com atributos explícitos e valores escalares. Também aceita arrays de registros. Cada registro vira um `INSERT`; `find_or_create_by` gera uma inserção condicional com `WHERE NOT EXISTS`. A ordem dos registros no seed é preservada. IDs, timestamps e outros valores exigidos pelo banco precisam ser informados nos atributos ou definidos por default no schema. O gerador não executa validações, callbacks nem preenchimento automático de timestamps do Active Record.
 
-Consultas e comandos dependentes de resultados do banco, como `where`, `first` e uso de IDs gerados automaticamente, não podem ser convertidos sem conexão e geram erro. Blocos de `create` e `find_or_create_by` podem preencher atributos do registro antes do `INSERT`; opções de `insert_all` são rejeitadas. Como o arquivo Ruby é carregado durante a geração, use apenas seeds confiáveis e revise o SQL antes da execução.
+Consultas e comandos dependentes de resultados do banco, como `where`, `first` e uso de IDs gerados automaticamente, não podem ser convertidos sem conexão e geram erro. Blocos de `create` e `find_or_create_by` podem preencher atributos do registro antes do `INSERT`, inclusive `create!` sem atributos iniciais. Aliases declarados com `alias_attribute` são convertidos nos nomes reais das colunas, também nas condições de `find_or_create_by`. Opções de `insert_all` são rejeitadas. Como o arquivo Ruby é carregado durante a geração, use apenas seeds confiáveis e revise o SQL antes da execução.
+
+Se um seed usa consultas como `SiteSetting.first_or_initialize`, a compilação desse seed é interrompida sem acessar o banco. Isso não impede a geração das migrations com `dba:sql` sem `SEEDS=1`. Erros de Ruby e operações não suportadas em seeds identificam o arquivo e, quando disponível, a linha da falha. Arquivos `seeds.sql` de execuções anteriores são preservados; execute somente os arquivos listados pela geração atual.
+
+Na API Ruby, use `RailsMigrations2sql.generate(from: "20260923130000", seeds: true)` para incluir seeds. Esta opção substitui o carregamento automático de seeds das versões anteriores.
 
 ### Da versão inicial até a última migration
 
@@ -205,7 +212,7 @@ bin/rails dba:sql FROM=20260923130000
 
 Esse comando inclui `20260923130000` e todas as migrations posteriores disponíveis nos arquivos do projeto, em ordem crescente de versão. Não é necessário informar `TO` nem conhecer a última versão: o limite final é a maior versão disponível. Cada migration gera seu próprio arquivo SQL.
 
-Use `FROM` para esse lote; `VERSION=20260923130000` seleciona somente aquela migration. A seleção não consulta o banco para verificar quais versões já foram aplicadas.
+Use `FROM` para esse lote; `VERSION=20260923130000` seleciona somente aquela migration. A seleção não consulta o banco para verificar quais versões já foram aplicadas. `FROM` e `TO` devem conter somente dígitos, com `FROM` menor ou igual a `TO`; valores inválidos interrompem a geração.
 
 Para gerar o mesmo lote em outro dialeto:
 
@@ -239,13 +246,19 @@ Em `create_table`, estão disponíveis chamadas como `string`, `text`, `integer`
 
 Nomes automáticos de foreign keys compostas e check constraints seguem o algoritmo do Active Record. Ao remover uma constraint criada por um SQL antigo da gem com um nome diferente, informe o nome existente em `name:`.
 
+O schema virtual acompanha chaves primárias, join tables, referências e colunas adicionadas no próprio lote. Assim, `add_column` seguido de `change_column_null` pode fornecer o tipo necessário sem snapshot. Índices inline (`t.string :email, index: true`) são incluídos no SQL; a remoção de um índice conhecido preserva seu nome explícito.
+
+No PostgreSQL, `change_column` preserva `using:`/`cast_as:` e índices aceitam expressões e as condições `if_not_exists:`/`if_exists:`. Opções de índices sem tradução implementada para o destino são rejeitadas em modo estrito.
+
+Literais Unicode do SQL Server usam o prefixo `N`, conforme a [documentação de constantes da Microsoft](https://learn.microsoft.com/en-us/sql/t-sql/data-types/constants-transact-sql). Textos com barras invertidas em MySQL/MariaDB usam literais hexadecimais UTF-8 para preservar o conteúdo independentemente de `NO_BACKSLASH_ESCAPES`; veja a [documentação de introducers do MySQL](https://dev.mysql.com/doc/refman/8.0/en/charset-introducer.html). Valores numéricos sem representação suportada, como `NaN`, infinito, complexos e racionais, são rejeitados.
+
 As opções disponíveis variam conforme o dialeto. O suporte a uma operação não implica suporte a todas as opções dos adapters do Active Record.
 
 ## Aplicação da migration e SQL literal
 
 Escreva a migration normalmente com `change` ou `up`. A gem avalia `change` quando ele está definido; caso contrário, avalia `up`. O corpo selecionado é avaliado uma única vez por migration e dialeto. Não é necessário converter a DSL para `execute`.
 
-Cada arquivo de migration e o snapshot são carregados uma vez por chamada de geração. Cada dialeto mantém seu próprio schema virtual, atualizado entre migrations sem copiar toda a estrutura a cada avaliação. O corpo de `change`/`up` continua sendo avaliado por dialeto, inclusive quando consulta `connection.adapter_name`. Uma nova chamada de geração recarrega os arquivos.
+Cada arquivo de migration e o snapshot são carregados uma vez por chamada de geração. Cada dialeto mantém seu próprio schema virtual, atualizado entre migrations sem copiar toda a estrutura a cada avaliação. O corpo de `change`/`up` continua sendo avaliado por dialeto, inclusive quando consulta `connection.adapter_name`. Uma nova chamada de geração recarrega os arquivos em namespaces isolados, evitando que métodos removidos permaneçam ativos na próxima execução. Classes de migrations devem ser declaradas normalmente (`class NomeDaMigration`), sem forçar constantes globais com `class ::NomeDaMigration`. Versões duplicadas nos diretórios configurados interrompem a geração.
 
 O método `down` e os blocos `dir.down` de `reversible` não são avaliados. A gem não gera scripts de rollback nem exige que `change` seja reversível. `up_only` e blocos `dir.up` são incluídos. Um `revert` explícito dentro de `change` ou `up` continua sendo uma operação de aplicação e precisa ser reversível para ser compilado.
 
@@ -287,7 +300,7 @@ RailsMigrations2sql.configure do |config|
 end
 ```
 
-O snapshot não é aplicado ao banco. Ele deve representar o estado imediatamente anterior à primeira migration selecionada; deixe a opção desabilitada se o arquivo não corresponder a esse estado.
+O snapshot não é aplicado ao banco. Quando habilitado, o arquivo deve existir; caminhos `Pathname`, como `Rails.root.join(...)`, são aceitos. Ele deve representar o estado imediatamente anterior à primeira migration selecionada; deixe a opção desabilitada se o arquivo não corresponder a esse estado.
 
 ## Fluxo de execução pelo DBA
 
@@ -301,7 +314,7 @@ Cada arquivo contém as operações da migration e, ao final, o `INSERT` da vers
 
 ## Funcionamento e limitações
 
-A classe da migration e o arquivo de seeds, quando presente, são carregados como Ruby. O `MigrationSandbox` registra as operações da DSL de migrations; o `SeedRecorder` captura as inserções suportadas do seed. Os compiladores e gravadores produzem os arquivos SQL por dialeto.
+A classe da migration e o arquivo de seeds, quando solicitado, são carregados como Ruby. O `MigrationSandbox` registra as operações da DSL de migrations; o `SeedRecorder` captura as inserções suportadas do seed. Os compiladores e gravadores produzem os arquivos SQL por dialeto.
 
 O compilador não consulta dados da aplicação para decidir o que gerar. Migrations que dependem de modelos ou consultas, como as abaixo, ficam fora do fluxo offline suportado:
 

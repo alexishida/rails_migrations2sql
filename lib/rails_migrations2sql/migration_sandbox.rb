@@ -53,10 +53,8 @@ module RailsMigrations2sql
     end
 
     def create_join_table(table_1, table_2, **options)
-      table_name = options[:table_name] || [table_1.to_s, table_2.to_s].sort.join("_")
-      definition = TableDefinition.new(table_name)
-      definition.column("#{Util.singularize(table_1)}_id", options[:column_options]&.dig(:type) || :bigint, **(options[:column_options] || {}).reject { |k, _| k == :type })
-      definition.column("#{Util.singularize(table_2)}_id", options[:column_options]&.dig(:type) || :bigint, **(options[:column_options] || {}).reject { |k, _| k == :type })
+      table_name = options[:table_name] || Util.join_table_name(table_1, table_2)
+      definition = join_table_definition(table_name, table_1, table_2, options)
       yield definition if block_given?
       _rdm_recorder.record(Operation.new(name: :create_join_table, args: [table_1.to_s, table_2.to_s], options: options, data: definition.to_h))
     end
@@ -64,8 +62,8 @@ module RailsMigrations2sql
     def drop_join_table(table_1, table_2, **options)
       definition = nil
       if block_given?
-        table_name = options[:table_name] || [table_1.to_s, table_2.to_s].sort.join("_")
-        table_def = TableDefinition.new(table_name)
+        table_name = options[:table_name] || Util.join_table_name(table_1, table_2)
+        table_def = join_table_definition(table_name, table_1, table_2, options)
         yield table_def
         definition = table_def.to_h
       end
@@ -195,6 +193,15 @@ module RailsMigrations2sql
 
     private
 
+    def join_table_definition(name, first, second, options)
+      definition = TableDefinition.new(name)
+      column_options = { null: false, index: false }.merge(options[:column_options] || {})
+      [first, second].each do |table|
+        definition.references(Util.singularize(table), **column_options)
+      end
+      definition
+    end
+
     def with_recorder(recorder)
       previous = _rdm_recorder
       previous_connection = @_rdm_connection
@@ -209,6 +216,8 @@ module RailsMigrations2sql
     def enrich_from_schema(operation)
       if operation.name == :remove_index
         operation.args[1] ||= operation.options[:column]
+        index = _rdm_recorder.schema.index(operation.args[0], operation.args[1], **operation.options)
+        operation.options[:name] ||= index.name if index
       elsif operation.name == :change_column_null
         column = _rdm_recorder.schema.column(operation.args[0], operation.args[1])
         operation.options[:current_type] ||= column&.type

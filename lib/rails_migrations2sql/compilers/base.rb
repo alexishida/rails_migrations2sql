@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "bigdecimal"
+
 module RailsMigrations2sql
   module Compilers
     class Base
@@ -49,7 +51,12 @@ module RailsMigrations2sql
         when nil then "NULL"
         when true then boolean_literal(true)
         when false then boolean_literal(false)
-        when Numeric then value.to_s
+        when Numeric
+          unless (value.is_a?(Integer) || value.is_a?(Float) || value.is_a?(BigDecimal)) &&
+                 (!value.respond_to?(:finite?) || value.finite?)
+            raise UnsupportedOperationError, "Numeric value #{value.inspect} cannot be represented as an SQL literal"
+          end
+          value.to_s
         when Symbol then literal(value.to_s)
         when String then "'#{value.gsub("'", "''")}'"
         when Proc
@@ -74,13 +81,7 @@ module RailsMigrations2sql
         table = op.args[0]
         options = op.options
         data = op.data || {}
-        columns = Array(data[:columns]).dup
-
-        unless options[:id] == false || options[:primary_key].is_a?(Array) || columns.any? { |column| column.dig(:options, :primary_key) }
-          id_name = options[:primary_key] || "id"
-          id_type = options[:id].is_a?(Symbol) ? options[:id] : @primary_key_type
-          columns.unshift(name: id_name.to_s, type: id_type, options: { primary_key: true, auto_increment: %i[primary_key integer bigint].include?(id_type.to_sym) })
-        end
+        columns = Util.table_columns(data[:columns], options, primary_key_type: @primary_key_type)
 
         definitions = columns.map { |column| column_definition(column[:name], column[:type], column[:options] || {}) }
         if options[:primary_key].is_a?(Array)
@@ -108,12 +109,12 @@ module RailsMigrations2sql
       end
 
       def compile_create_join_table(op)
-        table = op.options[:table_name] || op.args.map(&:to_s).sort.join("_")
+        table = op.options[:table_name] || Util.join_table_name(*op.args)
         compile_create_table(Operation.new(name: :create_table, args: [table], options: op.options.merge(id: false), data: op.data))
       end
 
       def compile_drop_join_table(op)
-        table = op.options[:table_name] || op.args.map(&:to_s).sort.join("_")
+        table = op.options[:table_name] || Util.join_table_name(*op.args)
         compile_drop_table(Operation.new(name: :drop_table, args: [table], options: op.options))
       end
 
@@ -159,6 +160,9 @@ module RailsMigrations2sql
       end
 
       def compile_add_index(op)
+        if target != :postgresql && (op.options[:using] || op.options[:algorithm] || op.options[:if_not_exists])
+          return unsupported!(op.name, "#{target} does not support using:, algorithm: or if_not_exists: in this index compiler")
+        end
         table, columns = op.args.first(2)
         opts = op.options
         name = opts[:name] || Util.default_index_name(table, columns)
@@ -166,7 +170,7 @@ module RailsMigrations2sql
         using = opts[:using] ? " USING #{opts[:using]}" : ""
         concurrently = opts[:algorithm].to_s == "concurrently" ? " CONCURRENTLY" : ""
         column_sql = index_columns(columns, opts)
-        sql = "CREATE #{unique}INDEX#{concurrently} #{quote_identifier(name)} ON #{quote_table(table)}#{using} (#{column_sql})"
+        sql = "CREATE #{unique}INDEX#{concurrently}#{opts[:if_not_exists] ? ' IF NOT EXISTS' : ''} #{quote_identifier(name)} ON #{quote_table(table)}#{using} (#{column_sql})"
         sql += " WHERE #{opts[:where]}" if opts[:where]
         sql
       end
@@ -367,6 +371,8 @@ module RailsMigrations2sql
       end
 
       def index_columns(columns, opts)
+        return columns if columns.is_a?(String) && !columns.match?(/\A\w+\z/)
+
         order = opts[:order] || {}
         Array(columns).map do |column|
           name = column.to_s
