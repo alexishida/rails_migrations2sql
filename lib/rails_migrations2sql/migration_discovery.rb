@@ -2,7 +2,8 @@
 
 module RailsMigrations2sql
   class MigrationDiscovery
-    FILE_PATTERN = /\A(\d+)_([a-z0-9_]+)\.rb\z/
+    # Identification of migration files in the format <digits>_<name>.rb or <digits>_<name>.<something>.rb
+    FILE_PATTERN = /\A(\d+)_([a-z0-9_]+)(?:\.[a-z0-9_-]+)?\.rb\z/
 
     def initialize(configuration = RailsMigrations2sql.configuration)
       @configuration = configuration
